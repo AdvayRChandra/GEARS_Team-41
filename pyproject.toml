@@ -1,0 +1,11 @@
+[project]
+name = "gears-team-41"
+version = "0.1.0"
+description = "GEARS Team 41 Project"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
