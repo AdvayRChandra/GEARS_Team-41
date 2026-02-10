@@ -1,4 +1,8 @@
-# GEARS_Team-41
+# Global Emergency Autonomous Response System (GEARS) 
+
+**By Advay Chandra, Sarim Khan, Katherine Hugley, and Emma Wolcott**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Changelog](https://img.shields.io/badge/changelog-latest-green.svg)](CHANGELOG.md)
 
 This project uses [UV](https://github.com/astral-sh/uv) for Python package management.
 
