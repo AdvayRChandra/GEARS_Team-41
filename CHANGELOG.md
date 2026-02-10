@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-02-10
+
+### Added
+- Build HAT modules package (`buildhat/`)
+  - ColorSensor module for color sensing
+  - Hat module for HAT interface
+  - Motor and MotorPair modules for motor control
+  - PassiveMotor module for passive motor sensing
+  - BuildHAT serial interface module
+  - Exception handling module
+
+### Changed
+- Updated README.md with credits for external code (buildhat and basehat modules)
+
 ## [0.0.2] - 2026-02-10
 
 ### Added
