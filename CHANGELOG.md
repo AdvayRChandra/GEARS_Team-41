@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- CONTRIBUTING.md with code standards based on ENGR 141/142 Code Standard (V4.1.3) and PEP 8 supplement for modules and classes
+
 ### Changed
 - Updated README.md with new header
+- Updated README.md with link to Contributing Guidelines
+- Created config.toml
 
 ## [0.0.3] - 2026-02-10
 

@@ -2,7 +2,7 @@
 
 **By Advay Chandra, Sarim Khan, Katherine Hugley, and Emma Wolcott**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Changelog](https://img.shields.io/badge/changelog-latest-green.svg)](CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Changelog](https://img.shields.io/badge/changelog-latest-green.svg)](CHANGELOG.md) [![Contributing](https://img.shields.io/badge/contributing-guidelines-blue.svg)](CONTRIBUTING.md)
 
 This project uses [UV](https://github.com/astral-sh/uv) for Python package management.
 
