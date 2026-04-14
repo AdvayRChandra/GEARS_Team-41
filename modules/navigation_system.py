@@ -17,7 +17,7 @@ Classes:
 import asyncio
 import numpy as np
 import math
-from systems.state import State
+from modules.state import State
 
 # Gravity constant (m/s^2)
 GRAVITY = 9.80235
@@ -476,8 +476,8 @@ class Navigation(Location):
 
 if __name__ == "__main__":
     # Example usage
-    from systems.sensors import SensorInput
-    from systems.state import State
+    from modules.sensors import SensorInput
+    from modules.state import State
     
     # Create shared state
     state = State()
