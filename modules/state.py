@@ -20,8 +20,6 @@ class State:
     calibrated_orientation: bool = False  # Whether orientation/gyro is calibrated
     calibrated_mag: bool = False  # Whether magnetic field is calibrated
     bias: dict = None  # Calibration bias values
-    lf_left_value: float = 0.0  # Left line finder sensor value
-    lf_right_value: float = 0.0  # Right line finder sensor value
     line_state: str = "center"  # Line following state: "left", "center", "right"
     ultrasonic_distance: float = 30.0  # Ultrasonic sensor distance in cm
     color_sensor_value: int = 0  # Color sensor value 
