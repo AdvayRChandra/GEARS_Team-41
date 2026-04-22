@@ -5,12 +5,12 @@ navigation_system.py
 
 This module provides:
 - Transformation: 3D rotation and translation utilities using Euler angles
-- Location: Position tracking using IMU sensor data with dead reckoning
+- Location: Position tracking using motor odometry and orientation data
 - Navigation: Extended position tracking with timestamped logging
 
 Classes:
     Transformation: Handles 3D coordinate transformations (rotation/translation)
-    Location: Tracks position, velocity, and orientation using IMU integration
+    Location: Tracks position, velocity, and orientation using motor encoder data
     Navigation: Extends Location with continuous update loop and logging
 """
 
@@ -18,9 +18,6 @@ import asyncio
 import numpy as np
 import math
 from modules.state import State
-
-# Gravity constant (m/s^2)
-GRAVITY = 9.80235
 
 
 class Transformation:
@@ -119,10 +116,11 @@ class Transformation:
 
 class Location:
     """
-    3D position tracking using IMU sensor data.
+    3D position tracking using motor odometry and gyroscope data.
     
-    Uses dead reckoning to estimate position by integrating acceleration
-    and gyroscope data. Position is tracked in a global reference frame.
+    Uses motor encoder displacement and wheel diameter to estimate position.
+    Orientation is updated from the IMU gyroscope, but accelerometer data is
+    not used for position calculations.
     Reads raw sensor data from State, which is updated by SensorInput.
     
     Args:
@@ -134,7 +132,6 @@ class Location:
     Attributes:
         state.position: Current position [x, y, z] in global frame
         state.velocity: Current velocity [vx, vy, vz] in global frame
-        state.acceleration: Current acceleration [ax, ay, az] in global frame (gravity-compensated)
         state.orientation: Current orientation [yaw, pitch, roll]
     """
     
@@ -184,16 +181,16 @@ class Location:
         # Velocity decay factor to reduce drift (0.0 = no decay, 1.0 = instant stop)
         self.velocity_decay = kwargs.get("velocity_decay", 0.4)
         
-        # Threshold for considering acceleration as noise (m/s^2)
-        self.accel_threshold = kwargs.get("accel_threshold", 0.05)
-        
         # Motor velocity threshold for velocity decay (degrees/second)
         self.motor_velocity_threshold = kwargs.get("motor_velocity_threshold", 1.0)
+
+        # Wheel diameter used for motor odometry
+        self.wheel_diameter = kwargs.get("wheel_diameter", self.state.wheel_diameter)
+        self.wheel_radius = self.wheel_diameter / 2.0
+        self.prev_motor_position = self.state.motor_position
         
         # Components
         self.transformer = Transformation(**kwargs)
-        self.motion_controller = kwargs.get("motion_controller", None)
-        self.initialized = False
     
     async def update_orientation(self, **kwargs):
         """
@@ -214,109 +211,65 @@ class Location:
             gyro_bias = self.state.bias["gyro"]
             angular_velocity -= np.array([gyro_bias[2], gyro_bias[1], gyro_bias[0]])
         
-        if not self.initialized:
-            # First iteration: initialize rates without calculating acceleration
-            self.state.angular_velocity = angular_velocity
-            self.initialized = True
-        else:
-            # Integrate orientation using previous angular velocity
-            self.state.orientation += 0.5 * self.state.angular_acceleration * (dt ** 2) + self.state.angular_velocity * dt
-            self.state.angular_acceleration = (angular_velocity - self.state.angular_velocity) / dt
-            self.state.angular_velocity = angular_velocity
-        
+        self.state.angular_velocity = angular_velocity
+        self.state.orientation += angular_velocity * dt
+
         return True
     
     async def update_imu_position(self, **kwargs):
         """
-        Update IMU position by integrating accelerometer data.
-        
-        Transforms local acceleration to global frame and subtracts gravity.
-        Applies calibration bias and noise thresholding.
-        The ground position is then calculated from the IMU position.
-        
-        Uses proper integration order:
-        1. Update IMU position using previous velocity and acceleration
-        2. Update velocity using previous acceleration
-        3. Calculate new acceleration for next iteration
-        4. Calculate ground position from IMU position
-        
+        Update position using motor odometry and wheel diameter.
+
+        Uses the change in motor position and the configured wheel diameter
+        to compute linear displacement. Orientation remains driven by the
+        IMU gyroscope, but accelerometer values are not used for position.
+
         Args:
             dt (float): Time step in seconds
             display (bool): Print position data if True
         """
         dt = kwargs.get("dt", 0.1)
         display = kwargs.get("display", False)
-        
-        # Store previous acceleration and velocity for integration
-        prev_acceleration = self.state.acceleration.copy()
-        prev_velocity = self.state.velocity.copy()
-        
-        # Update IMU position FIRST using previous velocity and acceleration
-        # p = p0 + v0*dt + 0.5*a0*dt^2
-        self.state.sensor_positions["imu"] = await self.transformer.translate_vector(
-            vector=self.state.sensor_positions["imu"],
-            translation=prev_velocity * dt + 0.5 * prev_acceleration * (dt ** 2)
-        )
-        
-        # Calculate ground position from IMU position
-        self.state.position = await self.transformer.translate_vector(
-            vector=self.state.sensor_positions["imu"],
-            translation=await self.transformer.rotate_vector(
-                vector=self.imu_to_ground,
-                yaw=self.state.orientation[0],
-                pitch=self.state.orientation[1],
-                roll=self.state.orientation[2],
-                invert=False
-            )
-        )
-        
-        # Update velocity SECOND using previous acceleration
-        # v = v0 + a0*dt
-        self.state.velocity = await self.transformer.translate_vector(
-            vector=prev_velocity,
-            translation=prev_acceleration * dt
-        )
-        
-        # Apply velocity decay to reduce drift when motor is near stationary
-        if self.motion_controller is not None:
-            if abs(self.state.motor_velocity) < self.motor_velocity_threshold:
-                self.state.velocity *= (1.0 - self.velocity_decay)
-        else:
-            # Fallback to acceleration threshold if no motion controller
-            if np.linalg.norm(prev_acceleration) < self.accel_threshold:
-                self.state.velocity *= (1.0 - self.velocity_decay)
-        
-        # Read new acceleration from State (updated by SensorInput)
-        accel_local = self.state.acceleration_raw.copy()
-        
-        # Subtract calibration bias if calibrated
-        if self.state.calibrated_position:
-            accel_local -= self.state.bias["accel"]
-        
-        # Transform local acceleration to global frame
-        accel_global = await self.transformer.rotate_vector(
-            vector=accel_local,
+
+        # Compute linear displacement from motor rotation
+        current_motor_position = self.state.motor_position
+        delta_motor_degrees = current_motor_position - self.prev_motor_position
+        self.prev_motor_position = current_motor_position
+
+        distance = math.radians(delta_motor_degrees) * self.wheel_radius
+        self.state.distance_traveled += abs(distance) * 100.0
+
+        translation_local = np.array([distance, 0.0, 0.0])
+        translation_global = await self.transformer.rotate_vector(
+            vector=translation_local,
             yaw=self.state.orientation[0],
             pitch=self.state.orientation[1],
             roll=self.state.orientation[2],
-            invert=True
+            invert=False
         )
-        
-        # If not calibrated, remove gravity (calibrated bias already includes gravity)
-        if not self.state.calibrated_position:
-            accel_global -= np.array([0.0, 0.0, GRAVITY])
-        
-        # Apply noise threshold - treat small accelerations as zero
-        for i in range(3):
-            if abs(accel_global[i]) < self.accel_threshold:
-                accel_global[i] = 0.0
-        
-        # Store new acceleration for next iteration
-        self.state.acceleration = accel_global
-        
+
+        self.state.position = await self.transformer.translate_vector(
+            vector=self.state.position,
+            translation=translation_global
+        )
+
+        # Estimate velocity from motor angular velocity and wheel radius
+        linear_velocity = math.radians(self.state.motor_velocity) * self.wheel_radius
+        self.state.velocity = await self.transformer.rotate_vector(
+            vector=np.array([linear_velocity, 0.0, 0.0]),
+            yaw=self.state.orientation[0],
+            pitch=self.state.orientation[1],
+            roll=self.state.orientation[2],
+            invert=False
+        )
+
+        # Apply velocity decay when motors are effectively stationary
+        if abs(self.state.motor_velocity) < self.motor_velocity_threshold:
+            self.state.velocity *= (1.0 - self.velocity_decay)
+
         if display:
-            print(f"Position: {self.state.position}, Velocity: {self.state.velocity}, Acceleration: {self.state.acceleration}")
-        
+            print(f"Position: {self.state.position}, Velocity: {self.state.velocity}")
+
         return True
     
     async def update_positions_from_imu(self, **kwargs):
@@ -324,64 +277,39 @@ class Location:
         Update all sensor positions relative to the ground position.
         Ground position is already calculated in update_imu_position.
         """
-        self.state.sensor_positions["lf_left"] = await self.transformer.translate_vector(
-            vector=self.state.position,
-            translation=await self.transformer.rotate_vector(
-                vector=self.ground_to_lf_left,
-                yaw=self.state.orientation[0],
-                pitch=self.state.orientation[1],
-                roll=self.state.orientation[2],
-                invert=False
-            )
-        )
+        sensor_offsets = {
+            "lf_left": self.ground_to_lf_left,
+            "lf_right": self.ground_to_lf_right,
+            "color_sensor": self.ground_to_color,
+            "cargo_deploy": self.ground_to_cargo
+        }
 
-        self.state.sensor_positions["lf_right"] = await self.transformer.translate_vector(
-            vector=self.state.position,
-            translation=await self.transformer.rotate_vector(
-                vector=self.ground_to_lf_right,
-                yaw=self.state.orientation[0],
-                pitch=self.state.orientation[1],
-                roll=self.state.orientation[2],
-                invert=False
+        for sensor, offset in sensor_offsets.items():
+            self.state.sensor_positions[sensor] = await self.transformer.translate_vector(
+                vector=self.state.position,
+                translation=await self.transformer.rotate_vector(
+                    vector=offset,
+                    yaw=self.state.orientation[0],
+                    pitch=self.state.orientation[1],
+                    roll=self.state.orientation[2],
+                    invert=False
+                )
             )
-        )
-
-        self.state.sensor_positions["color_sensor"] = await self.transformer.translate_vector(
-            vector=self.state.position,
-            translation=await self.transformer.rotate_vector(
-                vector=self.ground_to_color,
-                yaw=self.state.orientation[0],
-                pitch=self.state.orientation[1],
-                roll=self.state.orientation[2],
-                invert=False
-            )
-        )
-
-        self.state.sensor_positions["cargo_deploy"] = await self.transformer.translate_vector(
-            vector=self.state.position,
-            translation=await self.transformer.rotate_vector(
-                vector=self.ground_to_cargo,
-                yaw=self.state.orientation[0],
-                pitch=self.state.orientation[1],
-                roll=self.state.orientation[2],
-                invert=False
-            )
-        )
 
     async def update_position(self, **kwargs):
         """
-        Update position by integrating IMU data.
-        
+        Update position based on motor odometry and current orientation.
+
         Args:
             dt (float): Time step in seconds
             display (bool): Print position data if True
         """
         dt = kwargs.get("dt", 0.1)
         display = kwargs.get("display", False)
-        
+
         await self.update_imu_position(dt=dt, display=display)
         await self.update_positions_from_imu()
-        
+
         return True
 
     def get_position(self):
@@ -395,36 +323,14 @@ class Location:
 
     async def update(self, dt):
         """
-        Update the location state based on sensor data from State.
+        Update the location state based on motor odometry and gyroscope data.
         Assumes SensorInput is running and updating State.
 
         Args:
             dt (float): Time step in seconds.
         """
-        # Apply calibration bias to get corrected values (if calibrated)
-        if self.state.calibrated_position and self.state.bias is not None and "accel" in self.state.bias:
-            self.state.acceleration = self.state.acceleration_raw - self.state.bias["accel"]
-        else:
-            self.state.acceleration = self.state.acceleration_raw.copy()
-        
-        if self.state.calibrated_orientation and self.state.bias is not None and "gyro" in self.state.bias:
-            self.state.angular_velocity = self.state.angular_velocity_raw - self.state.bias["gyro"]
-        else:
-            self.state.angular_velocity = self.state.angular_velocity_raw.copy()
-
-        # Integrate acceleration to update velocity and position
-        self.state.velocity = (1 - self.velocity_decay) * (self.state.velocity + self.state.acceleration * dt)
-        self.state.position += self.state.velocity * dt
-
-        # Update orientation using angular velocity
-        self.state.orientation += self.state.angular_velocity * dt
-
-        # Apply thresholds to filter noise
-        if np.linalg.norm(self.state.acceleration) < self.accel_threshold:
-            self.state.acceleration = np.zeros(3)
-
-        if np.linalg.norm(self.state.velocity) < self.motor_velocity_threshold:
-            self.state.velocity = np.zeros(3)
+        await self.update_position(dt=dt)
+        await self.update_orientation(dt=dt)
 
 
 class Navigation(Location):
