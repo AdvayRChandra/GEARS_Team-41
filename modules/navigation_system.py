@@ -180,9 +180,6 @@ class Location:
 
         # Velocity decay factor to reduce drift (0.0 = no decay, 1.0 = instant stop)
         self.velocity_decay = kwargs.get("velocity_decay", 0.4)
-        
-        # Motor velocity threshold for velocity decay (degrees/second)
-        self.motor_velocity_threshold = kwargs.get("motor_velocity_threshold", 1.0)
 
         # Wheel diameter used for motor odometry
         self.wheel_diameter = kwargs.get("wheel_diameter", self.state.wheel_diameter)
@@ -378,38 +375,3 @@ class Navigation(Location):
         while True:
             await self.update_state(dt=update_interval)
             await asyncio.sleep(update_interval)
-
-
-if __name__ == "__main__":
-    # Example usage
-    from modules.sensors import SensorInput
-    from modules.state import State
-    
-    # Create shared state
-    state = State()
-    
-    # Create sensors with shared state
-    sensors = SensorInput(imu=True, state=state)
-    
-    # Create navigator with shared state
-    navigator = Navigation(state=state, mode="degrees")
-    
-    async def main():
-        # Start sensor update loop
-        sensor_task = asyncio.create_task(sensors.run_sensor_update())
-        
-        # Allow sensors to start updating
-        await asyncio.sleep(0.1)
-        
-        # Calibrate IMU via sensors module
-        await sensors.calibrate_imu()
-        
-        try:
-            await navigator.run_continuous_update(update_interval=0.1)
-        finally:
-            sensor_task.cancel()
-    
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("Stopping navigation.")
