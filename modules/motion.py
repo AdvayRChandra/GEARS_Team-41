@@ -10,8 +10,8 @@ class MotionController:
     def __init__(self, state: State, config: RobotConfig):
         self.state = state
         self.speed = config.motor_speed
-        self.motor_left = Motor('A')   # Left motor  — port A
-        self.motor_right = Motor('B')  # Right motor — port B
+        self.motor_left = Motor(config.motors.port_left)
+        self.motor_right = Motor(config.motors.port_right)
 
     def _sync_state(self):
         """Update state.motor_* with current hardware readings."""

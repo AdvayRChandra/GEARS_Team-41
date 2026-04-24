@@ -15,6 +15,9 @@ Structure:
     ├── angle_tolerance: float          — heading error threshold for navigation
     ├── initial_position: np.ndarray    — starting [x, y, z] in meters
     ├── initial_orientation: np.ndarray — starting [yaw, pitch, roll]
+    ├── motors: MotorConfig
+    │   ├── port_left: str              — BuildHAT port for left motor ("A"–"D")
+    │   └── port_right: str             — BuildHAT port for right motor ("A"–"D")
     └── sensors: SensorConfig
         ├── enable_imu: bool
         ├── enable_ultrasonic: bool
@@ -34,6 +37,18 @@ import numpy as np
 
 def _zero_vector() -> np.ndarray:
     return np.zeros(3, dtype=float)
+
+
+@dataclass
+class MotorConfig:
+    """Static configuration for the drive motors.
+
+    Attributes:
+        port_left: BuildHAT port letter for the left motor (default: "A").
+        port_right: BuildHAT port letter for the right motor (default: "B").
+    """
+    port_left: str = "A"
+    port_right: str = "B"
 
 
 @dataclass
@@ -135,4 +150,5 @@ class RobotConfig:
     angle_tolerance: float = 5.0
     initial_position: np.ndarray = field(default_factory=_zero_vector)
     initial_orientation: np.ndarray = field(default_factory=_zero_vector)
+    motors: MotorConfig = field(default_factory=MotorConfig)
     sensors: SensorConfig = field(default_factory=SensorConfig)

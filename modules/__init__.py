@@ -3,7 +3,7 @@ from ..systems.mobility_system import MotionController
 from .navigation_system import Transformation, Location
 from .state import State, SensorState, NavigationState, MotorState
 from .sensors import SensorInput
-from .config import RobotConfig, SensorConfig, UltrasonicSensorConfig, IRSensorConfig
+from .config import RobotConfig, SensorConfig, UltrasonicSensorConfig, IRSensorConfig, MotorConfig
 
 # Note: task_manager.py is currently empty
 
@@ -20,4 +20,5 @@ __all__ = [
     'SensorConfig',
     'UltrasonicSensorConfig',
     'IRSensorConfig',
+    'MotorConfig',
 ]
