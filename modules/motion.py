@@ -1,3 +1,4 @@
+import asyncio
 from buildhat import Motor
 from .state import State
 
@@ -57,4 +58,24 @@ class MotionController:
         self.state.motor_left.is_moving = False
         self.state.motor_right.is_moving = False
         self._sync_state()
+
+    async def setup(self):
+        """Sync motor state once before the update loop starts."""
+        self._sync_state()
+
+    async def run_motor_update(self, **kwargs):
+        """
+        Continuously sync motor positions and motion status into state.
+
+        Location reads state.motor_left.position and state.motor_right.position
+        every tick. Without this loop those values would only update on drive
+        commands, making odometry stale whenever the robot is coasting or idle.
+
+        Args:
+            update_interval (float): Update interval in seconds (default: 0.05)
+        """
+        update_interval = kwargs.get("update_interval", 0.05)
+        while True:
+            self._sync_state()
+            await asyncio.sleep(update_interval)
 

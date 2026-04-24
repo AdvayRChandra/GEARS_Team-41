@@ -11,7 +11,7 @@ This module provides:
 Classes:
     Transformation: Handles 3D coordinate transformations (rotation/translation)
     Location: Tracks position, velocity, and orientation using motor encoder data
-    Navigation: Extends Location with continuous update loop and logging
+    Navigation: Waypoint navigation and obstacle detection with timestamped logging
 """
 
 import asyncio
@@ -186,20 +186,153 @@ class Location:
         self.state.nav.acceleration = (velocity - self.state.nav.velocity) / dt
         self.state.nav.velocity = velocity
 
+        await self._compute_sensor_poses()
+
         return True
+
+    def _euler_from_matrix(self, R: np.ndarray) -> np.ndarray:
+        """
+        Extract [yaw, pitch, roll] from a ZYX rotation matrix built by Transformation.
+        Handles the gimbal-lock singularity (|pitch| == 90°) by setting roll = 0.
+        """
+        sin_pitch = np.clip(-R[0, 2], -1.0, 1.0)
+        pitch = math.asin(sin_pitch)
+
+        if abs(abs(sin_pitch) - 1.0) < 1e-6:   # gimbal lock
+            yaw = math.atan2(-R[1, 0], R[1, 1])
+            roll = 0.0
+        else:
+            yaw = math.atan2(R[0, 1], R[0, 0])
+            roll = math.atan2(R[1, 2], R[2, 2])
+
+        if self.mode == "degrees":
+            return np.array([math.degrees(yaw), math.degrees(pitch), math.degrees(roll)])
+        return np.array([yaw, pitch, roll])
+
+    async def _compute_sensor_poses(self):
+        """
+        Compute world-frame pose for each ultrasonic sensor from the robot's current
+        pose and the sensor-to-IMU mount transforms stored in SensorState.
+
+        For each sensor:
+          1. Position transform:
+             world_pos = robot_position + R_robot @ local_position
+          2. Orientation transform:
+             R_world = R_robot @ R_sensor_local
+             world_orient = euler(R_world)
+        """
+        R_robot = await self.transformer.get_rotation(orientation=self.state.nav.orientation)
+
+        for side in ("left", "right", "center"):
+            sensor = getattr(self.state.sensors, f"ultrasonic_{side}")
+
+            # Step 1 — position transform
+            world_pos = self.state.nav.position + np.matmul(R_robot, sensor.local_position)
+
+            # Step 2 — orientation transform
+            R_sensor = await self.transformer.get_rotation(orientation=sensor.local_orientation)
+            R_world = np.matmul(R_robot, R_sensor)
+            world_orient = self._euler_from_matrix(R_world)
+
+            sensor.world_position = world_pos
+            sensor.world_orientation = world_orient
     
     async def update(self, dt: float = 0.1):
         """Update both orientation and position."""
         await self.update_orientation(dt=dt)
         await self.update_position(dt=dt)
         return True
-    
+
+    async def setup(self):
+        """
+        Snapshot the current motor positions as the odometry baseline.
+
+        Call this once after SensorInput.setup() so the first update() delta
+        starts from the actual motor positions rather than the constructor-time
+        values (which may differ if motors moved during hardware init).
+        """
+        self._prev_motor_left = self.state.motor_left.position
+        self._prev_motor_right = self.state.motor_right.position
+
+    async def run_location_update(self, **kwargs):
+        """
+        Continuously update position and orientation at a fixed interval.
+
+        Reads sensor data written by SensorInput into state.sensors and writes
+        the computed pose into state.nav.  Run concurrently with
+        SensorInput.run_sensor_update() so state.sensors is always fresh.
+
+        Args:
+            update_interval (float): Update interval in seconds (default: 0.05)
+        """
+        update_interval = kwargs.get("update_interval", 0.05)
+        loop = asyncio.get_running_loop()
+        last_time = loop.time()
+
+        while True:
+            await asyncio.sleep(update_interval)
+            now = loop.time()
+            dt = now - last_time
+            last_time = now
+            await self.update(dt=dt)
+
+
 class Navigation:
+    """
+    Waypoint navigation and obstacle detection on top of a shared State.
+
+    Reads pose data written by Location and sensor data written by SensorInput
+    to project ultrasonic readings into world-frame obstacle positions and to
+    navigate to 2D waypoints.  Does not own a Location; both classes share the
+    same State instance.
+
+    Args:
+        state (State): Centralized state object shared with SensorInput and Location
+        motion (MotionController): Motion controller used to issue drive commands
+        angle_tolerance (float): Heading error in degrees considered "aligned" (default: 5.0)
+
+    Attributes:
+        _obstacles (dict): Latest world-frame obstacle positions keyed by "left", "right", "center"
+        _log (list): Timestamped position/orientation history
+    """
     def __init__(self, state: State, motion: MotionController, **kwargs):
         self.state = state
         self.motion = motion
         self.angle_tolerance = kwargs.get("angle_tolerance", 5.0)
         self._log = []
+        self._obstacles = {"left": None, "right": None, "center": None}
+        self.transformer = Transformation(mode=state.mode)
+
+    async def get_obstacle_positions(self) -> dict:
+        """
+        Project each ultrasonic reading into the global frame.
+
+        For each sensor with a valid distance reading, computes the world-frame
+        position of the detected surface:
+
+            obstacle = sensor.world_position + R(sensor.world_orientation) @ [distance, 0, 0]
+
+        Sensors reporting distance == -1.0 are skipped (no detection / timeout).
+
+        Returns:
+            dict with keys "left", "right", "center". Each value is either a
+            np.ndarray [x, y, z] in meters (global frame) or None if that sensor
+            had no valid reading.
+        """
+        result = {}
+        for side in ("left", "right", "center"):
+            sensor = getattr(self.state.sensors, f"ultrasonic_{side}")
+            if sensor.distance < 0.0:
+                result[side] = None
+                continue
+
+            # Sensor faces along its local +X axis; distance is in centimeters.
+            distance_m = sensor.distance / 100.0
+            R_sensor = await self.transformer.get_rotation(orientation=sensor.world_orientation)
+            facing = np.matmul(R_sensor, np.array([1.0, 0.0, 0.0]))
+            result[side] = sensor.world_position + facing * distance_m
+
+        return result
 
     async def go_to(self, destination):
         """
@@ -248,3 +381,103 @@ class Navigation:
 
             self.motion.forward()
             await asyncio.sleep(0)
+
+    async def setup(self):
+        """
+        Seed the navigation log with the robot's initial pose.
+
+        Call this once after Location.setup() so the log timestamp is anchored
+        to the moment navigation becomes active rather than object construction.
+        """
+        loop = asyncio.get_running_loop()
+        self._log.append({
+            "time": loop.time(),
+            "position": self.state.nav.position.copy(),
+            "orientation": self.state.nav.orientation.copy(),
+        })
+
+    async def run_navigation_update(self, **kwargs):
+        """
+        Continuously log navigation state and refresh obstacle positions.
+
+        Reads state.nav (written by Location.run_location_update) and
+        state.sensors (written by SensorInput.run_sensor_update) each tick.
+        Stores the latest obstacle world-frame positions in self._obstacles so
+        other systems can query them without calling get_obstacle_positions()
+        themselves.
+
+        Args:
+            update_interval (float): Update interval in seconds (default: 0.1)
+        """
+        update_interval = kwargs.get("update_interval", 0.1)
+        loop = asyncio.get_running_loop()
+
+        while True:
+            await asyncio.sleep(update_interval)
+            self._obstacles = await self.get_obstacle_positions()
+            self._log.append({
+                "time": loop.time(),
+                "position": self.state.nav.position.copy(),
+                "orientation": self.state.nav.orientation.copy(),
+            })
+
+
+if __name__ == "__main__":
+    # Run from the project root as:  python -m modules.navigation_system
+    # (relative imports at the top of this file require the package context)
+    from .sensors import SensorInput
+
+    async def _display_loop(state: State, interval: float = 0.5):
+        while True:
+            await asyncio.sleep(interval)
+            s = state.sensors
+            n = state.nav
+            print(
+                "\n--- State ---\n"
+                f"  position    : {n.position}\n"
+                f"  velocity    : {n.velocity}\n"
+                f"  orientation : {n.orientation}\n"
+                f"  gyro (raw)  : {s.angular_velocity_raw}\n"
+                f"  dist left   : {s.ultrasonic_left.distance:.1f} cm\n"
+                f"  dist right  : {s.ultrasonic_right.distance:.1f} cm\n"
+                f"  dist center : {s.ultrasonic_center.distance:.1f} cm\n"
+                f"  motor left  : pos={state.motor_left.position:.1f}  moving={state.motor_left.is_moving}\n"
+                f"  motor right : pos={state.motor_right.position:.1f}  moving={state.motor_right.is_moving}"
+            )
+
+    async def main():
+        state = State()
+
+        sensors = SensorInput(state=state)
+        location = Location(state=state)
+        motion = MotionController(state=state)   # required by Navigation; no motion commands issued
+        navigation = Navigation(state=state, motion=motion)
+
+        await sensors.setup()
+        await location.setup()
+        await motion.setup()
+        await navigation.setup()
+
+        tasks = [
+            asyncio.create_task(sensors.run_sensor_update()),
+            asyncio.create_task(location.run_location_update()),
+            asyncio.create_task(motion.run_motor_update()),
+            asyncio.create_task(navigation.run_navigation_update()),
+            asyncio.create_task(_display_loop(state)),
+        ]
+
+        print("Running — press Ctrl+C to stop.\n")
+        try:
+            await asyncio.gather(*tasks)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            pass
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            print("\nShutdown complete.")
+
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

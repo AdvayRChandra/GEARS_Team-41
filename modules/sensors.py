@@ -25,6 +25,7 @@ class SensorInput:
     mobility, and other systems.
     
     Args:
+        state (State): Centralized state object shared with Location and Navigation
         imu (bool): Enable IMU sensor for gyroscope and magnetometer data (default: True)
         ultrasonic_left_pin (int): GPIO pin for left ultrasonic sensor (default: 16)
         ultrasonic_right_pin (int): GPIO pin for right ultrasonic sensor (default: 5)
@@ -41,7 +42,7 @@ class SensorInput:
         button_sensor: Button instance or None
     """
     
-    def __init__(self, **kwargs):
+    def __init__(self, state: State, **kwargs):
         # IMU sensor (gyroscope and magnetometer)
         if kwargs.get("imu", True):
             self.imu = IMUSensor()
@@ -73,7 +74,7 @@ class SensorInput:
         self._dist_center = -1.0
         
         # Centralized state
-        self.state = kwargs.get("state", State())
+        self.state = state
     
     # -------------------------------------------------------------------------
     # IMU Methods
@@ -90,6 +91,7 @@ class SensorInput:
             return (0.0, 0.0, 0.0)
         
         self._gyro = np.array(self.imu.getGyro())
+        self.state.sensors.angular_velocity_raw = self._gyro.copy()
         return tuple(self._gyro)
     
     async def get_mag(self):
@@ -103,6 +105,7 @@ class SensorInput:
             return (0.0, 0.0, 0.0)
         
         self._mag = np.array(self.imu.getMag())
+        self.state.sensors.magnetic_field = float(np.linalg.norm(self._mag))
         return tuple(self._mag)
     
     async def get_magnetic_magnitude(self):
@@ -116,7 +119,8 @@ class SensorInput:
             return 0.0
         
         self._mag = np.array(self.imu.getMag())
-        return float(np.linalg.norm(self._mag))
+        self.state.sensors.magnetic_field = float(np.linalg.norm(self._mag))
+        return self.state.sensors.magnetic_field
     
     # -------------------------------------------------------------------------
     # Ultrasonic Methods
@@ -133,6 +137,7 @@ class SensorInput:
             return -1.0
         val = self.ultrasonic_left.getDist
         self._dist_left = float(val) if val is not None else -1.0
+        self.state.sensors.ultrasonic_left.distance = self._dist_left
         return self._dist_left
     
     async def get_distance_right(self):
@@ -146,6 +151,7 @@ class SensorInput:
             return -1.0
         val = self.ultrasonic_right.getDist
         self._dist_right = float(val) if val is not None else -1.0
+        self.state.sensors.ultrasonic_right.distance = self._dist_right
         return self._dist_right
     
     async def get_distance_center(self):
@@ -159,6 +165,7 @@ class SensorInput:
             return -1.0
         val = self.ultrasonic_center.getDist
         self._dist_center = float(val) if val is not None else -1.0
+        self.state.sensors.ultrasonic_center.distance = self._dist_center
         return self._dist_center
     
     # -------------------------------------------------------------------------
@@ -216,21 +223,30 @@ class SensorInput:
         # Update ultrasonic distances
         if self.ultrasonic_left is not None:
             val = self.ultrasonic_left.getDist
-            self.state.sensors.ultrasonic_left = float(val) if val is not None else -1.0
+            self.state.sensors.ultrasonic_left.distance = float(val) if val is not None else -1.0
         if self.ultrasonic_right is not None:
             val = self.ultrasonic_right.getDist
-            self.state.sensors.ultrasonic_right = float(val) if val is not None else -1.0
+            self.state.sensors.ultrasonic_right.distance = float(val) if val is not None else -1.0
         if self.ultrasonic_center is not None:
             val = self.ultrasonic_center.getDist
-            self.state.sensors.ultrasonic_center = float(val) if val is not None else -1.0
+            self.state.sensors.ultrasonic_center.distance = float(val) if val is not None else -1.0
         
         # Update button state
         if self.button_sensor is not None:
             self.state.sensors.button_pressed = self.button_sensor.is_pressed
 
+    async def setup(self):
+        """
+        Prime State with an initial sensor reading before the update loop starts.
+        """
+        await self.update_state()
+
     async def run_sensor_update(self, **kwargs):
         """
         Continuously update sensor readings to State at a fixed interval.
+
+        Call setup() before starting this loop so State is valid on the first
+        tick consumed by Location and Navigation.
         
         Args:
             update_interval (float): Update interval in seconds (default: 0.05)
