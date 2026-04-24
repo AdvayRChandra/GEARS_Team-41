@@ -453,6 +453,9 @@ if __name__ == "__main__":
                 f"  dist left   : {s.ultrasonic_left.distance:.1f} cm\n"
                 f"  dist right  : {s.ultrasonic_right.distance:.1f} cm\n"
                 f"  dist center : {s.ultrasonic_center.distance:.1f} cm\n"
+                f"  IR left     : {'N/A (not detected)' if s.ir_sensor.value1 == -1 else s.ir_sensor.value1}\n"
+                f"  IR right    : {'N/A (not detected)' if s.ir_sensor.value2 == -1 else s.ir_sensor.value2}\n"
+                f"  magnetic    : {s.magnetic_field:.2f}\n"
                 f"  motor left  : pos={state.motor_left.position:.1f}  moving={state.motor_left.is_moving}\n"
                 f"  motor right : pos={state.motor_right.position:.1f}  moving={state.motor_right.is_moving}"
             )

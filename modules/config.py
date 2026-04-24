@@ -95,7 +95,7 @@ class SensorConfig:
     enable_imu: bool = True
     enable_ultrasonic: bool = True
     enable_button: bool = False
-    enable_ir_sensor: bool = False
+    enable_ir_sensor: bool = True
     button_pin: int = 22
 
     # Mount transforms are in the robot frame with the IMU at the origin.
@@ -104,14 +104,14 @@ class SensorConfig:
     # Update these to match the physical sensor placement on the robot.
     ultrasonic_left: UltrasonicSensorConfig = field(
         default_factory=lambda: UltrasonicSensorConfig(
-            pin=16,
+            pin=22,
             local_position=np.array([0.0, 0.0, 0.0]),
             local_orientation=np.array([90.0, 0.0, 0.0]),
         )
     )
     ultrasonic_right: UltrasonicSensorConfig = field(
         default_factory=lambda: UltrasonicSensorConfig(
-            pin=5,
+            pin=24,
             local_position=np.array([0.0, 0.0, 0.0]),
             local_orientation=np.array([-90.0, 0.0, 0.0]),
         )
@@ -125,7 +125,7 @@ class SensorConfig:
     )
     ir_sensor: IRSensorConfig = field(
         default_factory=lambda: IRSensorConfig(
-            pin=0,
+            pin=2,
             local_position=np.array([0.0, 0.0, 0.0]),
         )
     )

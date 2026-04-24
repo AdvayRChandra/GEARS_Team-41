@@ -51,12 +51,12 @@ class IRSensorState:
     """Runtime state for the IR sensor.
 
     Attributes:
-        value1: Latest reading from the left IR element (0-255), or -1 if unavailable.
-        value2: Latest reading from the right IR element (0-255), or -1 if unavailable.
+        value1: Latest reading from the left IR element (0-999), or -1 if unavailable.
+        value2: Latest reading from the right IR element (0-999), or -1 if unavailable.
         world_position: Sensor origin in global frame, meters [x, y, z]. Updated each tick.
     """
-    value1: int = -1
-    value2: int = -1
+    value1: int = -1  # 0-999
+    value2: int = -1  # 0-999
     world_position: np.ndarray = field(default_factory=_zero_vector)
 
 

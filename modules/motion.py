@@ -1,13 +1,29 @@
 import asyncio
+import serial
 from buildhat import Motor
 from .state import State
 from .config import RobotConfig
+
+
+def _flush_serial(device: str = "/dev/serial0") -> None:
+    """Discard accumulated HAT data from the OS serial buffer.
+
+    The BuildHAT continuously streams sensor/motor data while running.
+    If this data accumulates before BuildHAT.__init__ reads the serial port,
+    the unrecognized lines overflow the retry counter and raise BuildHATError.
+    """
+    try:
+        with serial.Serial(device, 115200, timeout=0.05) as s:
+            s.reset_input_buffer()
+    except serial.SerialException:
+        pass
 
 
 class MotionController:
     """Class for controlling the robot's motion."""
 
     def __init__(self, state: State, config: RobotConfig):
+        _flush_serial()
         self.state = state
         self.speed = config.motor_speed
         self.motor_left = Motor(config.motors.port_left)

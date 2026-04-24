@@ -1,5 +1,5 @@
 # MACRO core systems modules
-from ..systems.mobility_system import MotionController
+from .motion import MotionController
 from .navigation_system import Transformation, Location
 from .state import State, SensorState, NavigationState, MotorState
 from .sensors import SensorInput
