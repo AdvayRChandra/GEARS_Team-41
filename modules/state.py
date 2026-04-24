@@ -1,37 +1,62 @@
+"""
+State container for centralized sensor and navigation data.
+
+This module defines dataclasses used by SensorInput, MotionController,
+and navigation subsystems to share current pose, motion, and raw sensor
+values in a single coherent object.
+
+Structure:
+    State
+    ├── sensors: SensorState        — raw readings from all hardware sensors
+    ├── nav: NavigationState        — computed pose, velocity, and orientation
+    ├── motor_left: MotorState      — left motor (port A) position and motion status
+    └── motor_right: MotorState     — right motor (port B) position and motion status
+"""
+
+from __future__ import annotations
 from dataclasses import dataclass, field
 import numpy as np
 
+
+def _zero_vector() -> np.ndarray:
+    return np.zeros(3, dtype=float)
+
+
+@dataclass
+class MotorState:
+    is_moving: bool = False
+    position: float = 0.0
+
+
+@dataclass
+class SensorState:
+    # IMU (raw)
+    acceleration_raw: np.ndarray = field(default_factory=_zero_vector)
+    angular_velocity_raw: np.ndarray = field(default_factory=_zero_vector)
+    magnetic_field: float = 0.0
+
+    # Peripheral sensors
+    ultrasonic_distance: float = -1.0
+    lf_left_value: float = 0.0
+    lf_right_value: float = 0.0
+    button_pressed: bool = False
+    color_sensor_value: int = -1
+
+
+@dataclass
+class NavigationState:
+    position: np.ndarray = field(default_factory=_zero_vector)
+    velocity: np.ndarray = field(default_factory=_zero_vector)
+    acceleration: np.ndarray = field(default_factory=_zero_vector)
+    orientation: np.ndarray = field(default_factory=_zero_vector)
+    angular_velocity: np.ndarray = field(default_factory=_zero_vector)
+    angular_acceleration: np.ndarray = field(default_factory=_zero_vector)
+
+
 @dataclass
 class State:
-    """Class for tracking the robot's state."""
-    position: np.ndarray = field(default_factory=lambda: np.zeros(3))  # x, y, z position in meters
-    sensor_positions: dict = None  # Positions of various sensors
-    velocity: np.ndarray = field(default_factory=lambda: np.zeros(3))  # x, y, z velocity in m/s
-    acceleration_raw: np.ndarray = field(default_factory=lambda: np.zeros(3))  # Raw acceleration from IMU in m/s²
-    acceleration: np.ndarray = field(default_factory=lambda: np.zeros(3))  # x, y, z acceleration in m/s²
-    orientation: np.ndarray = field(default_factory=lambda: np.zeros(3))  # Orientation as Euler angles (yaw, pitch, roll)
-    angular_velocity_raw: np.ndarray = field(default_factory=lambda: np.zeros(3))  # Raw angular velocity from IMU in deg/s
-    angular_velocity: np.ndarray = field(default_factory=lambda: np.zeros(3))  # Bias-corrected angular velocity in deg/s
-    angular_acceleration: np.ndarray = field(default_factory=lambda: np.zeros(3))  # Angular acceleration in deg/s²
-    magnetic_field: float = 0.0  # Magnetic field magnitude in µT
-    mag_delta: float = 0.0  # Magnetic field difference from baseline in µT
-    cargo_level: str = "none"  # Cargo detection level: "none", "edge", "semi", "full"
-    calibrated_position: bool = False  # Whether position/acceleration is calibrated
-    calibrated_orientation: bool = False  # Whether orientation/gyro is calibrated
-    calibrated_mag: bool = False  # Whether magnetic field is calibrated
-    bias: dict = None  # Calibration bias values
-    line_state: str = "center"  # Line following state: "left", "center", "right"
-    ultrasonic_distance: float = 30.0  # Ultrasonic sensor distance in cm
-    color_sensor_value: int = 0  # Color sensor value 
-    button_pressed: bool = False  # Button state
-    motor_position: float = 0.0  # Front motor position in degrees
-    motor_velocity: float = 0.0  # Front motor velocity in degrees per second
-    wheel_diameter: float = 0.056  # Wheel diameter used for odometry in meters
-    distance_traveled: float = 0.0  # Total distance traveled in cm
-    turn_position: float = 0.0  # Turn motor position in degrees
-    deploying_cargo: bool = False  # Whether cargo is being deployed (pauses motion)
-    cargo_number: int = 0 # Number of cargo spot needed to deploy
-    mobility_enabled: bool = True  # Whether mobility is enabled (button toggle)
-    override: bool = False # Check if mobility is overridden.
-    override_start_distance: float = 0.0  # Distance when override was triggered
-    override_end_distance: float = 0.0  # Distance at which override ends
+    sensors: SensorState = field(default_factory=SensorState)
+    nav: NavigationState = field(default_factory=NavigationState)
+    motor_left: MotorState = field(default_factory=MotorState)
+    motor_right: MotorState = field(default_factory=MotorState)
+    mode: str = "degrees"

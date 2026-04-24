@@ -321,30 +321,30 @@ class SensorInput:
         # Update IMU values
         if self.imu is not None:
             accel = self.imu.getAccel()
-            self.state.acceleration_raw = np.array(accel)
+            self.state.sensors.acceleration_raw = np.array(accel)
             
             gyro = self.imu.getGyro()
-            self.state.angular_velocity_raw = np.array(gyro)
+            self.state.sensors.angular_velocity_raw = np.array(gyro)
             
             mag = self.imu.getMag()
-            self.state.magnetic_field = float(np.linalg.norm(np.array(mag)))
+            self.state.sensors.magnetic_field = float(np.linalg.norm(np.array(mag)))
         
         # Update ultrasonic distance
         if self.ultrasonic is not None:
             try:
-                self.state.ultrasonic_distance = float(self.ultrasonic.getDist)
+                self.state.sensors.ultrasonic_distance = float(self.ultrasonic.getDist)
             except:
                 pass  # Keep previous value on error
         
         # Update line finder values
         if self.line_finder_left is not None:
-            self.state.lf_left_value = float(self.line_finder_left.value)
+            self.state.sensors.lf_left_value = float(self.line_finder_left.value)
         if self.line_finder_right is not None:
-            self.state.lf_right_value = float(self.line_finder_right.value)
+            self.state.sensors.lf_right_value = float(self.line_finder_right.value)
         
         # Update button state
         if self.button_sensor is not None:
-            self.state.button_pressed = self.button_sensor.is_pressed
+            self.state.sensors.button_pressed = self.button_sensor.is_pressed
         
         # Update color sensor
         if self.color_sensor is not None:
@@ -355,7 +355,7 @@ class SensorInput:
                     "black": 0, "white": 1, "red": 2, "green": 3,
                     "blue": 4, "yellow": 5, "none": -1
                 }
-                self.state.color_sensor_value = color_map.get(color, -1)
+                self.state.sensors.color_sensor_value = color_map.get(color, -1)
             except:
                 pass  # Keep previous value on error
 
@@ -371,171 +371,3 @@ class SensorInput:
         while True:
             await self.update_state()
             await asyncio.sleep(update_interval)
-
-    # -------------------------------------------------------------------------
-    # Calibration Methods
-    # -------------------------------------------------------------------------
-
-    async def calibrate_imu(self, **kwargs):
-        """
-        Calibrate the entire IMU by measuring bias while stationary.
-        
-        Call this method when the robot is completely still and away from magnets.
-        Takes multiple samples and averages them.
-        Calibrates acceleration, gyro, and magnetic field biases.
-        
-        Args:
-            samples (int): Number of samples to average (default: 50)
-            delay (float): Delay between samples in seconds (default: 0.02)
-        """
-        samples = kwargs.get("samples", 50)
-        delay = kwargs.get("delay", 0.02)
-        
-        if self.imu is None:
-            print("No IMU sensor available.")
-            return False
-        
-        print("Calibrating IMU... Keep robot stationary and away from magnets.")
-        
-        # Initialize bias dict if needed
-        if self.state.bias is None:
-            self.state.bias = {}
-        
-        accel_sum = np.array([0.0, 0.0, 0.0])
-        gyro_sum = np.array([0.0, 0.0, 0.0])
-        mag_sum = 0.0
-        
-        for i in range(samples):
-            # Read directly from IMU hardware
-            accel = self.imu.getAccel()
-            accel_sum += np.array(accel)
-            
-            gyro = self.imu.getGyro()
-            gyro_sum += np.array(gyro)
-            
-            mag = self.imu.getMag()
-            mag_sum += float(np.linalg.norm(np.array(mag)))
-            
-            await asyncio.sleep(delay)
-        
-        # Average the readings
-        self.state.bias["accel"] = accel_sum / samples
-        self.state.bias["gyro"] = gyro_sum / samples
-        self.state.bias["mag"] = mag_sum / samples
-        
-        # Set all calibration flags
-        self.state.calibrated_position = True
-        self.state.calibrated_orientation = True
-        self.state.calibrated_mag = True
-        
-        print(f"IMU calibration complete.")
-        print(f"  Accel bias: {self.state.bias['accel']}")
-        print(f"  Gyro bias: {self.state.bias['gyro']}")
-        print(f"  Mag baseline: {self.state.bias['mag']:.2f} µT")
-        
-        return True
-
-    async def calibrate_position(self, **kwargs):
-        """
-        Calibrate only the accelerometer for position tracking.
-        
-        Args:
-            samples (int): Number of samples to average (default: 50)
-            delay (float): Delay between samples in seconds (default: 0.02)
-        """
-        samples = kwargs.get("samples", 50)
-        delay = kwargs.get("delay", 0.02)
-        
-        if self.imu is None:
-            print("No IMU sensor available.")
-            return False
-        
-        print("Calibrating accelerometer... Keep robot stationary.")
-        
-        if self.state.bias is None:
-            self.state.bias = {}
-        
-        accel_sum = np.array([0.0, 0.0, 0.0])
-        
-        for i in range(samples):
-            accel = self.imu.getAccel()
-            accel_sum += np.array(accel)
-            await asyncio.sleep(delay)
-        
-        self.state.bias["accel"] = accel_sum / samples
-        self.state.calibrated_position = True
-        
-        print(f"Accelerometer calibration complete.")
-        print(f"  Accel bias: {self.state.bias['accel']}")
-        
-        return True
-
-    async def calibrate_orientation(self, **kwargs):
-        """
-        Calibrate only the gyroscope for orientation tracking.
-        
-        Args:
-            samples (int): Number of samples to average (default: 50)
-            delay (float): Delay between samples in seconds (default: 0.02)
-        """
-        samples = kwargs.get("samples", 50)
-        delay = kwargs.get("delay", 0.02)
-        
-        if self.imu is None:
-            print("No IMU sensor available.")
-            return False
-        
-        print("Calibrating gyroscope... Keep robot stationary.")
-        
-        if self.state.bias is None:
-            self.state.bias = {}
-        
-        gyro_sum = np.array([0.0, 0.0, 0.0])
-        
-        for i in range(samples):
-            gyro = self.imu.getGyro()
-            gyro_sum += np.array(gyro)
-            await asyncio.sleep(delay)
-        
-        self.state.bias["gyro"] = gyro_sum / samples
-        self.state.calibrated_orientation = True
-        
-        print(f"Gyroscope calibration complete.")
-        print(f"  Gyro bias: {self.state.bias['gyro']}")
-        
-        return True
-
-    async def calibrate_magnetic(self, **kwargs):
-        """
-        Calibrate only the magnetometer for magnetic field detection.
-        
-        Args:
-            samples (int): Number of samples to average (default: 50)
-            delay (float): Delay between samples in seconds (default: 0.02)
-        """
-        samples = kwargs.get("samples", 50)
-        delay = kwargs.get("delay", 0.02)
-        
-        if self.imu is None:
-            print("No IMU sensor available.")
-            return False
-        
-        print("Calibrating magnetometer... Keep robot away from magnets.")
-        
-        if self.state.bias is None:
-            self.state.bias = {}
-        
-        mag_sum = 0.0
-        
-        for i in range(samples):
-            mag = self.imu.getMag()
-            mag_sum += float(np.linalg.norm(np.array(mag)))
-            await asyncio.sleep(delay)
-        
-        self.state.bias["mag"] = mag_sum / samples
-        self.state.calibrated_mag = True
-        
-        print(f"Magnetometer calibration complete.")
-        print(f"  Mag baseline: {self.state.bias['mag']:.2f} µT")
-        
-        return True

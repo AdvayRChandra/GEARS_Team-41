@@ -17,7 +17,7 @@ Classes:
 import asyncio
 import numpy as np
 import math
-from modules.state import State
+from .state import State
 
 
 class Transformation:
@@ -85,26 +85,22 @@ class Transformation:
         
         Rotation order: Yaw -> Pitch -> Roll (ZYX convention)
         """
-        yaw = kwargs.get("yaw", 0.0)
-        pitch = kwargs.get("pitch", 0.0)
-        roll = kwargs.get("roll", 0.0)
+        orientation = kwargs.get("orientation", [0.0, 0.0, 0.0])
         invert = kwargs.get("invert", False)
         
-        R_yaw = await self.get_rotation_yaw(yaw=yaw, invert=invert)
-        R_pitch = await self.get_rotation_pitch(pitch=pitch, invert=invert)
-        R_roll = await self.get_rotation_roll(roll=roll, invert=invert)
+        R_yaw = await self.get_rotation_yaw(yaw=orientation[0], invert=invert)
+        R_pitch = await self.get_rotation_pitch(pitch=orientation[1], invert=invert)
+        R_roll = await self.get_rotation_roll(roll=orientation[2], invert=invert)
         
         return np.matmul(R_yaw, np.matmul(R_pitch, R_roll))
     
     async def rotate_vector(self, **kwargs):
         """Apply rotation to a 3D vector."""
         vector = np.array(kwargs.get("vector", [0.0, 0.0, 0.0]))
-        yaw = kwargs.get("yaw", 0.0)
-        pitch = kwargs.get("pitch", 0.0)
-        roll = kwargs.get("roll", 0.0)
+        orientation = kwargs.get("orientation", [0.0, 0.0, 0.0])
         invert = kwargs.get("invert", False)
         
-        R = await self.get_rotation(yaw=yaw, pitch=pitch, roll=roll, invert=invert)
+        R = await self.get_rotation(orientation=orientation, invert=invert)
         return np.matmul(R, vector)
     
     async def translate_vector(self, **kwargs):
@@ -124,254 +120,75 @@ class Location:
     Reads raw sensor data from State, which is updated by SensorInput.
     
     Args:
-        state (State): Centralized state object for sensor data
+        state (State): Centralized state object for sensor and navigation data
         position (list): Initial position [x, y, z] in meters
         orientation (list): Initial orientation [yaw, pitch, roll] in degrees
+        wheel_diameter (float): Wheel diameter in meters (default: 0.056)
         mode (str): Angle unit mode - "degrees" (default) or "radians"
     
     Attributes:
-        state.position: Current position [x, y, z] in global frame
-        state.velocity: Current velocity [vx, vy, vz] in global frame
-        state.orientation: Current orientation [yaw, pitch, roll]
+        state.nav.position: Current position [x, y, z] in global frame
+        state.nav.velocity: Current velocity [vx, vy, vz] in global frame
+        state.nav.orientation: Current orientation [yaw, pitch, roll]
     """
     
-    def __init__(self, **kwargs):
-        # Initialize State dataclass (accept external state or create new)
-        self.state = kwargs.get("state", State(
-            position=np.array(kwargs.get("position", [0.0, 0.0, 0.0])),
-            orientation=np.array(kwargs.get("orientation", [0.0, 0.0, 0.0])),
-            sensor_positions={
-                "imu": np.array([0.0, 0.0, 0.0]),
-                "lf_left": np.array([0.0, 0.0, 0.0]),
-                "lf_right": np.array([0.0, 0.0, 0.0]),
-                "color_sensor": np.array([0.0, 0.0, 0.0]),
-                "cargo_deploy": np.array([0.0, 0.0, 0.0])
-            }
-        ))
-        
-        # Initialize sensor_positions if not set
-        if self.state.sensor_positions is None:
-            self.state.sensor_positions = {
-                "imu": np.array([0.0, 0.0, 0.0]),
-                "lf_left": np.array([0.0, 0.0, 0.0]),
-                "lf_right": np.array([0.0, 0.0, 0.0]),
-                "color_sensor": np.array([0.0, 0.0, 0.0]),
-                "cargo_deploy": np.array([0.0, 0.0, 0.0])
-            }
+    def __init__(self, state: State, **kwargs):
+        self.state = state
+        self.wheel_diameter = kwargs.get("wheel_diameter", 0.056)
+        self.mode = kwargs.get("mode", "degrees")
 
-        # Previous state values for calculations
-        self.prev_position = self.state.position.copy()
-        self.prev_orientation = self.state.orientation.copy()
+        # Seed nav state from kwargs
+        self.state.nav.position = np.array(kwargs.get("position", [0.0, 0.0, 0.0]))
+        self.state.nav.velocity = np.zeros(3)
+        self.state.nav.acceleration = np.zeros(3)
+        self.state.nav.orientation = np.array(kwargs.get("orientation", [0.0, 0.0, 0.0]))
+        self.state.nav.angular_velocity = np.zeros(3)
+        self.state.nav.angular_acceleration = np.zeros(3)
 
-        # Sensor position offsets
-        self.imu_to_ground = np.array([0.0, 0.0, -kwargs.get("imu_height", 0.015)])
-        self.ground_to_lf_left = np.array([kwargs.get("imu_to_lf", 0.125), kwargs.get("lf_offset", 0.0225), kwargs.get("lf_height", 0.025)])
-        self.ground_to_lf_right = np.array([kwargs.get("imu_to_lf", 0.125), -kwargs.get("lf_offset", 0.0225), kwargs.get("lf_height", 0.025)])
-        self.ground_to_color = np.array([-kwargs.get("imu_to_color", 0.11), 0.0, kwargs.get("color_sensor_height", 0.025)])
-        self.ground_to_cargo = np.array([-kwargs.get("imu_to_cargo", 0.24), 0.0, 0.0])
+        # Track previous motor positions to compute deltas
+        self._prev_motor_left = state.motor_left.position
+        self._prev_motor_right = state.motor_right.position
 
-        # Calibration offsets (measured when stationary)
-        if self.state.bias is None:
-            self.state.bias = {
-                "accel": np.array([0.0, 0.0, 0.0]),
-                "gyro": np.array([0.0, 0.0, 0.0]),
-                "mag": 0.0
-            }
-
-        # Velocity decay factor to reduce drift (0.0 = no decay, 1.0 = instant stop)
-        self.velocity_decay = kwargs.get("velocity_decay", 0.4)
-
-        # Wheel diameter used for motor odometry
-        self.wheel_diameter = kwargs.get("wheel_diameter", self.state.wheel_diameter)
-        self.wheel_radius = self.wheel_diameter / 2.0
-        self.prev_motor_position = self.state.motor_position
-        
-        # Components
-        self.transformer = Transformation(**kwargs)
+        self.transformer = Transformation(mode=self.mode)
     
-    async def update_orientation(self, **kwargs):
-        """
-        Update orientation by integrating gyroscope data from State.
-        
-        Args:
-            dt (float): Time step in seconds
-        """
-        dt = kwargs.get("dt", 0.1)
-        
-        # Get angular velocity from State (updated by SensorInput)
-        # State stores as [gx, gy, gz], convert to [yaw, pitch, roll]
-        raw_gyro = self.state.angular_velocity_raw
-        angular_velocity = np.array([raw_gyro[2], raw_gyro[1], raw_gyro[0]])  # yaw, pitch, roll
+    async def update_orientation(self, dt: float = 0.1):
+        gyro = self.state.sensors.angular_velocity_raw
 
-        # Subtract gyro bias if calibrated (reorder bias from [gx, gy, gz] to [gz, gy, gx])
-        if self.state.calibrated_orientation:
-            gyro_bias = self.state.bias["gyro"]
-            angular_velocity -= np.array([gyro_bias[2], gyro_bias[1], gyro_bias[0]])
-        
-        self.state.angular_velocity = angular_velocity
-        self.state.orientation += angular_velocity * dt
+        self.state.nav.orientation += (
+            0.5 * self.state.nav.angular_acceleration * dt ** 2
+            + self.state.nav.angular_velocity * dt
+        )
+        self.state.nav.angular_acceleration = (gyro - self.state.nav.angular_velocity) / dt
+        self.state.nav.angular_velocity = gyro
 
         return True
     
-    async def update_imu_position(self, **kwargs):
-        """
-        Update position using motor odometry and wheel diameter.
+    async def update_position(self, dt: float = 0.1):
+        delta_left = self.state.motor_left.position - self._prev_motor_left
+        delta_right = self.state.motor_right.position - self._prev_motor_right
+        delta_degrees = (delta_left + delta_right) / 2
+        distance = (delta_degrees / 360) * math.pi * self.wheel_diameter
 
-        Uses the change in motor position and the configured wheel diameter
-        to compute linear displacement. Orientation remains driven by the
-        IMU gyroscope, but accelerometer values are not used for position.
+        self._prev_motor_left = self.state.motor_left.position
+        self._prev_motor_right = self.state.motor_right.position
 
-        Args:
-            dt (float): Time step in seconds
-            display (bool): Print position data if True
-        """
-        dt = kwargs.get("dt", 0.1)
-        display = kwargs.get("display", False)
-
-        # Compute linear displacement from motor rotation
-        current_motor_position = self.state.motor_position
-        delta_motor_degrees = current_motor_position - self.prev_motor_position
-        self.prev_motor_position = current_motor_position
-
-        distance = math.radians(delta_motor_degrees) * self.wheel_radius
-        self.state.distance_traveled += abs(distance) * 100.0
-
-        translation_local = np.array([distance, 0.0, 0.0])
-        translation_global = await self.transformer.rotate_vector(
-            vector=translation_local,
-            yaw=self.state.orientation[0],
-            pitch=self.state.orientation[1],
-            roll=self.state.orientation[2],
-            invert=False
+        speed = distance / dt if dt > 0 else 0.0
+        velocity = await self.transformer.rotate_vector(
+            vector=[speed, 0.0, 0.0],
+            orientation=self.state.nav.orientation
         )
 
-        self.state.position = await self.transformer.translate_vector(
-            vector=self.state.position,
-            translation=translation_global
+        self.state.nav.position += (
+            0.5 * self.state.nav.acceleration * dt ** 2
+            + self.state.nav.velocity * dt
         )
-
-        # Estimate velocity from motor angular velocity and wheel radius
-        linear_velocity = math.radians(self.state.motor_velocity) * self.wheel_radius
-        self.state.velocity = await self.transformer.rotate_vector(
-            vector=np.array([linear_velocity, 0.0, 0.0]),
-            yaw=self.state.orientation[0],
-            pitch=self.state.orientation[1],
-            roll=self.state.orientation[2],
-            invert=False
-        )
-
-        # Apply velocity decay when motors are effectively stationary
-        if abs(self.state.motor_velocity) < self.motor_velocity_threshold:
-            self.state.velocity *= (1.0 - self.velocity_decay)
-
-        if display:
-            print(f"Position: {self.state.position}, Velocity: {self.state.velocity}")
+        self.state.nav.acceleration = (velocity - self.state.nav.velocity) / dt
+        self.state.nav.velocity = velocity
 
         return True
     
-    async def update_positions_from_imu(self, **kwargs):
-        """
-        Update all sensor positions relative to the ground position.
-        Ground position is already calculated in update_imu_position.
-        """
-        sensor_offsets = {
-            "lf_left": self.ground_to_lf_left,
-            "lf_right": self.ground_to_lf_right,
-            "color_sensor": self.ground_to_color,
-            "cargo_deploy": self.ground_to_cargo
-        }
-
-        for sensor, offset in sensor_offsets.items():
-            self.state.sensor_positions[sensor] = await self.transformer.translate_vector(
-                vector=self.state.position,
-                translation=await self.transformer.rotate_vector(
-                    vector=offset,
-                    yaw=self.state.orientation[0],
-                    pitch=self.state.orientation[1],
-                    roll=self.state.orientation[2],
-                    invert=False
-                )
-            )
-
-    async def update_position(self, **kwargs):
-        """
-        Update position based on motor odometry and current orientation.
-
-        Args:
-            dt (float): Time step in seconds
-            display (bool): Print position data if True
-        """
-        dt = kwargs.get("dt", 0.1)
-        display = kwargs.get("display", False)
-
-        await self.update_imu_position(dt=dt, display=display)
-        await self.update_positions_from_imu()
-
-        return True
-
-    def get_position(self):
-        """
-        Get the current position as a tuple.
-        
-        Returns:
-            tuple: Current position (x, y, z) in meters
-        """
-        return tuple(self.state.position)
-
-    async def update(self, dt):
-        """
-        Update the location state based on motor odometry and gyroscope data.
-        Assumes SensorInput is running and updating State.
-
-        Args:
-            dt (float): Time step in seconds.
-        """
-        await self.update_position(dt=dt)
+    async def update(self, dt: float = 0.1):
+        """Update both orientation and position."""
         await self.update_orientation(dt=dt)
-
-
-class Navigation(Location):
-    """
-    3D navigation system.
-    
-    Extends Location with state updates and display functionality.
-    Magnetic field handling is done by the Cargo class.
-    
-    Args:
-        Inherits all arguments from Location
-    """
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-    
-    async def update_state(self, **kwargs):
-        """
-        Update navigation state: position and orientation.
-        
-        Args:
-            dt (float): Time step in seconds (default: 0.1)
-        """
-        dt = kwargs.get("dt", 0.1)
-
-        # Update previous state values
-        self.prev_position = self.state.position.copy()
-        self.prev_orientation = self.state.orientation.copy()
-
-        # Update current state (position and orientation only)
-        # These methods update state in-place
         await self.update_position(dt=dt)
-        await self.update_orientation(dt=dt)
-    
-    async def run_continuous_update(self, **kwargs):
-        """
-        Continuously update navigation state at a fixed interval.
-        Calibration should be done via SensorInput before calling this.
-        
-        Args:
-            update_interval (float): Update interval in seconds (default: 0.1)
-        """
-        update_interval = kwargs.get("update_interval", 0.1)
-        
-        while True:
-            await self.update_state(dt=update_interval)
-            await asyncio.sleep(update_interval)
+        return True
