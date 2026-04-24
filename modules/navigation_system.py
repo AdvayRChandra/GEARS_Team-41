@@ -19,6 +19,7 @@ import numpy as np
 import math
 from .state import State
 from .motion import MotionController
+from .config import RobotConfig
 
 
 class Transformation:
@@ -121,11 +122,9 @@ class Location:
     Reads raw sensor data from State, which is updated by SensorInput.
     
     Args:
-        state (State): Centralized state object for sensor and navigation data
-        position (list): Initial position [x, y, z] in meters
-        orientation (list): Initial orientation [yaw, pitch, roll] in degrees
-        wheel_diameter (float): Wheel diameter in meters (default: 0.056)
-        mode (str): Angle unit mode - "degrees" (default) or "radians"
+        state (State): Centralized state object for sensor and navigation data.
+        config (RobotConfig): Static robot configuration (wheel diameter, mode,
+            initial pose, sensor mount transforms).
     
     Attributes:
         state.nav.position: Current position [x, y, z] in global frame
@@ -133,16 +132,17 @@ class Location:
         state.nav.orientation: Current orientation [yaw, pitch, roll]
     """
     
-    def __init__(self, state: State, **kwargs):
+    def __init__(self, state: State, config: RobotConfig):
         self.state = state
-        self.wheel_diameter = kwargs.get("wheel_diameter", 0.056)
-        self.mode = kwargs.get("mode", "degrees")
+        self.config = config
+        self.wheel_diameter = config.wheel_diameter
+        self.mode = config.mode
 
-        # Seed nav state from kwargs
-        self.state.nav.position = np.array(kwargs.get("position", [0.0, 0.0, 0.0]))
+        # Seed nav state from config
+        self.state.nav.position = config.initial_position.copy()
         self.state.nav.velocity = np.zeros(3)
         self.state.nav.acceleration = np.zeros(3)
-        self.state.nav.orientation = np.array(kwargs.get("orientation", [0.0, 0.0, 0.0]))
+        self.state.nav.orientation = config.initial_orientation.copy()
         self.state.nav.angular_velocity = np.zeros(3)
         self.state.nav.angular_acceleration = np.zeros(3)
 
@@ -213,7 +213,7 @@ class Location:
         """
         Compute world-frame pose for each ultrasonic sensor and world-frame
         position for the IR sensor from the robot's current pose and the
-        sensor-to-IMU mount transforms stored in SensorState.
+        sensor-to-IMU mount transforms stored in RobotConfig.
 
         For each ultrasonic sensor:
           1. Position transform:
@@ -229,22 +229,24 @@ class Location:
         R_robot = await self.transformer.get_rotation(orientation=self.state.nav.orientation)
 
         for side in ("left", "right", "center"):
-            sensor = getattr(self.state.sensors, f"ultrasonic_{side}")
+            sensor_state = getattr(self.state.sensors, f"ultrasonic_{side}")
+            sensor_cfg = getattr(self.config.sensors, f"ultrasonic_{side}")
 
             # Step 1 — position transform
-            world_pos = self.state.nav.position + np.matmul(R_robot, sensor.local_position)
+            world_pos = self.state.nav.position + np.matmul(R_robot, sensor_cfg.local_position)
 
             # Step 2 — orientation transform
-            R_sensor = await self.transformer.get_rotation(orientation=sensor.local_orientation)
+            R_sensor = await self.transformer.get_rotation(orientation=sensor_cfg.local_orientation)
             R_world = np.matmul(R_robot, R_sensor)
             world_orient = self._euler_from_matrix(R_world)
 
-            sensor.world_position = world_pos
-            sensor.world_orientation = world_orient
+            sensor_state.world_position = world_pos
+            sensor_state.world_orientation = world_orient
 
         # IR sensor — position only, no orientation
-        ir = self.state.sensors.ir_sensor
-        ir.world_position = self.state.nav.position + np.matmul(R_robot, ir.local_position)
+        ir_state = self.state.sensors.ir_sensor
+        ir_cfg = self.config.sensors.ir_sensor
+        ir_state.world_position = self.state.nav.position + np.matmul(R_robot, ir_cfg.local_position)
     
     async def update(self, dt: float = 0.1):
         """Update both orientation and position."""
@@ -296,21 +298,21 @@ class Navigation:
     same State instance.
 
     Args:
-        state (State): Centralized state object shared with SensorInput and Location
-        motion (MotionController): Motion controller used to issue drive commands
-        angle_tolerance (float): Heading error in degrees considered "aligned" (default: 5.0)
+        state (State): Centralized state object shared with SensorInput and Location.
+        motion (MotionController): Motion controller used to issue drive commands.
+        config (RobotConfig): Static robot configuration (mode, angle_tolerance).
 
     Attributes:
         _obstacles (dict): Latest world-frame obstacle positions keyed by "left", "right", "center"
         _log (list): Timestamped position/orientation history
     """
-    def __init__(self, state: State, motion: MotionController, **kwargs):
+    def __init__(self, state: State, motion: MotionController, config: RobotConfig):
         self.state = state
         self.motion = motion
-        self.angle_tolerance = kwargs.get("angle_tolerance", 5.0)
+        self.angle_tolerance = config.angle_tolerance
         self._log = []
         self._obstacles = {"left": None, "right": None, "center": None}
-        self.transformer = Transformation(mode=state.mode)
+        self.transformer = Transformation(mode=config.mode)
 
     async def get_obstacle_positions(self) -> dict:
         """
@@ -435,6 +437,7 @@ if __name__ == "__main__":
     # Run from the project root as:  python -m modules.navigation_system
     # (relative imports at the top of this file require the package context)
     from .sensors import SensorInput
+    from .config import RobotConfig
 
     async def _display_loop(state: State, interval: float = 0.5):
         while True:
@@ -456,11 +459,12 @@ if __name__ == "__main__":
 
     async def main():
         state = State()
+        config = RobotConfig()
 
-        sensors = SensorInput(state=state)
-        location = Location(state=state)
-        motion = MotionController(state=state)   # required by Navigation; no motion commands issued
-        navigation = Navigation(state=state, motion=motion)
+        sensors = SensorInput(state=state, config=config)
+        location = Location(state=state, config=config)
+        motion = MotionController(state=state, config=config)
+        navigation = Navigation(state=state, motion=motion, config=config)
 
         await sensors.setup()
         await location.setup()

@@ -1,14 +1,15 @@
 import asyncio
 from buildhat import Motor
 from .state import State
+from .config import RobotConfig
 
 
 class MotionController:
     """Class for controlling the robot's motion."""
 
-    def __init__(self, state: State, **kwargs):
+    def __init__(self, state: State, config: RobotConfig):
         self.state = state
-        self.speed = kwargs.get("speed", 50)
+        self.speed = config.motor_speed
         self.motor_left = Motor('A')   # Left motor  — port A
         self.motor_right = Motor('B')  # Right motor — port B
 

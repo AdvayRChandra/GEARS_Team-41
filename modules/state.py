@@ -1,13 +1,13 @@
 """
 State container for centralized sensor and navigation data.
 
-This module defines dataclasses used by SensorInput, MotionController,
-and navigation subsystems to share current pose, motion, and raw sensor
-values in a single coherent object.
+This module holds only values that change at runtime (sensor readings,
+computed pose, motor state).  Static configuration (pins, mount offsets,
+wheel diameter, etc.) lives in config.py.
 
 Structure:
     State
-    ├── sensors: SensorState        — raw readings and mount config for all hardware sensors
+    ├── sensors: SensorState        — raw and computed readings for all hardware sensors
     │   ├── ultrasonic_left: UltrasonicSensorState
     │   ├── ultrasonic_right: UltrasonicSensorState
     │   ├── ultrasonic_center: UltrasonicSensorState
@@ -34,35 +34,29 @@ class MotorState:
 
 @dataclass
 class UltrasonicSensorState:
-    """All state for a single ultrasonic sensor.
+    """Runtime state for a single ultrasonic sensor.
 
     Attributes:
         distance: Latest range reading in centimeters, or -1.0 if unavailable.
-        local_position: Sensor origin offset from IMU in robot frame, meters [x, y, z].
-        local_orientation: Sensor axis orientation relative to IMU frame, [yaw, pitch, roll] degrees.
         world_position: Sensor origin in global frame, meters [x, y, z]. Updated each tick.
         world_orientation: Sensor heading in global frame, [yaw, pitch, roll] degrees. Updated each tick.
     """
     distance: float = -1.0
-    local_position: np.ndarray = field(default_factory=_zero_vector)
-    local_orientation: np.ndarray = field(default_factory=_zero_vector)
     world_position: np.ndarray = field(default_factory=_zero_vector)
     world_orientation: np.ndarray = field(default_factory=_zero_vector)
 
 
 @dataclass
 class IRSensorState:
-    """All state for the IR sensor.
+    """Runtime state for the IR sensor.
 
     Attributes:
         value1: Latest reading from the left IR element (0-255), or -1 if unavailable.
         value2: Latest reading from the right IR element (0-255), or -1 if unavailable.
-        local_position: Sensor origin offset from IMU in robot frame, meters [x, y, z].
         world_position: Sensor origin in global frame, meters [x, y, z]. Updated each tick.
     """
     value1: int = -1
     value2: int = -1
-    local_position: np.ndarray = field(default_factory=_zero_vector)
     world_position: np.ndarray = field(default_factory=_zero_vector)
 
 
@@ -100,4 +94,3 @@ class State:
     nav: NavigationState = field(default_factory=NavigationState)
     motor_left: MotorState = field(default_factory=MotorState)
     motor_right: MotorState = field(default_factory=MotorState)
-    mode: str = "degrees"

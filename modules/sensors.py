@@ -7,14 +7,15 @@ This module provides:
 - SensorInput: Unified interface for all hardware sensors
 
 The SensorInput class manages all sensors (IMU gyroscope and magnetometer,
-three ultrasonic sensors, button) and provides a single point of access for
-navigation and mobility systems.
+three ultrasonic sensors, button, IR sensor) and provides a single point of
+access for navigation and mobility systems.
 """
 
 import asyncio
 import numpy as np
 from basehat import IMUSensor, UltrasonicSensor, Button, IRSensor
 from .state import State
+from .config import RobotConfig
 
 
 class SensorInput:
@@ -25,16 +26,8 @@ class SensorInput:
     mobility, and other systems.
     
     Args:
-        state (State): Centralized state object shared with Location and Navigation
-        imu (bool): Enable IMU sensor for gyroscope and magnetometer data (default: True)
-        ultrasonic_left_pin (int): GPIO pin for left ultrasonic sensor (default: 16)
-        ultrasonic_right_pin (int): GPIO pin for right ultrasonic sensor (default: 5)
-        ultrasonic_center_pin (int): GPIO pin for center ultrasonic sensor (default: 26)
-        ultrasonic (bool): Enable all ultrasonic sensors (default: True)
-        button_pin (int): GPIO pin for button (default: 22)
-        button (bool): Enable button (default: False)
-        ir_sensor_pin (int): Analog port number for IR sensor (default: 0); pin+1 is used automatically
-        ir_sensor (bool): Enable IR sensor (default: False)
+        state (State): Centralized state object shared with Location and Navigation.
+        config (RobotConfig): Static hardware configuration (pins, enabled flags).
     
     Attributes:
         imu: IMUSensor instance or None
@@ -45,34 +38,34 @@ class SensorInput:
         ir_sensor: IRSensor instance or None
     """
     
-    def __init__(self, state: State, **kwargs):
+    def __init__(self, state: State, config: RobotConfig):
+        sc = config.sensors
+
         # IMU sensor (gyroscope and magnetometer)
-        if kwargs.get("imu", True):
+        if sc.enable_imu:
             self.imu = IMUSensor()
         else:
             self.imu = None
         
         # Three ultrasonic sensors
-        if kwargs.get("ultrasonic", True):
-            self.ultrasonic_left = UltrasonicSensor(kwargs.get("ultrasonic_left_pin", 16))
-            self.ultrasonic_right = UltrasonicSensor(kwargs.get("ultrasonic_right_pin", 5))
-            self.ultrasonic_center = UltrasonicSensor(kwargs.get("ultrasonic_center_pin", 26))
+        if sc.enable_ultrasonic:
+            self.ultrasonic_left = UltrasonicSensor(sc.ultrasonic_left.pin)
+            self.ultrasonic_right = UltrasonicSensor(sc.ultrasonic_right.pin)
+            self.ultrasonic_center = UltrasonicSensor(sc.ultrasonic_center.pin)
         else:
             self.ultrasonic_left = None
             self.ultrasonic_right = None
             self.ultrasonic_center = None
         
         # Button (disabled by default)
-        if kwargs.get("button", False):
-            button_pin = kwargs.get("button_pin", 22)
-            self.button_sensor = Button(button_pin)
+        if sc.enable_button:
+            self.button_sensor = Button(sc.button_pin)
         else:
             self.button_sensor = None
 
         # IR sensor (disabled by default)
-        if kwargs.get("ir_sensor", False):
-            ir_pin = kwargs.get("ir_sensor_pin", 0)
-            self.ir_sensor = IRSensor(ir_pin, ir_pin + 1)
+        if sc.enable_ir_sensor:
+            self.ir_sensor = IRSensor(sc.ir_sensor.pin, sc.ir_sensor.pin + 1)
         else:
             self.ir_sensor = None
         
