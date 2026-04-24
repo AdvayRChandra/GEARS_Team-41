@@ -10,7 +10,8 @@ Structure:
     ├── sensors: SensorState        — raw readings and mount config for all hardware sensors
     │   ├── ultrasonic_left: UltrasonicSensorState
     │   ├── ultrasonic_right: UltrasonicSensorState
-    │   └── ultrasonic_center: UltrasonicSensorState
+    │   ├── ultrasonic_center: UltrasonicSensorState
+    │   └── ir_sensor: IRSensorState
     ├── nav: NavigationState        — computed pose, velocity, and orientation
     ├── motor_left: MotorState      — left motor (port A) position and motion status
     └── motor_right: MotorState     — right motor (port B) position and motion status
@@ -50,6 +51,22 @@ class UltrasonicSensorState:
 
 
 @dataclass
+class IRSensorState:
+    """All state for the IR sensor.
+
+    Attributes:
+        value1: Latest reading from the left IR element (0-255), or -1 if unavailable.
+        value2: Latest reading from the right IR element (0-255), or -1 if unavailable.
+        local_position: Sensor origin offset from IMU in robot frame, meters [x, y, z].
+        world_position: Sensor origin in global frame, meters [x, y, z]. Updated each tick.
+    """
+    value1: int = -1
+    value2: int = -1
+    local_position: np.ndarray = field(default_factory=_zero_vector)
+    world_position: np.ndarray = field(default_factory=_zero_vector)
+
+
+@dataclass
 class SensorState:
     # IMU (gyroscope and magnetometer)
     angular_velocity_raw: np.ndarray = field(default_factory=_zero_vector)
@@ -59,6 +76,9 @@ class SensorState:
     ultrasonic_left: UltrasonicSensorState = field(default_factory=UltrasonicSensorState)
     ultrasonic_right: UltrasonicSensorState = field(default_factory=UltrasonicSensorState)
     ultrasonic_center: UltrasonicSensorState = field(default_factory=UltrasonicSensorState)
+
+    # IR sensor
+    ir_sensor: IRSensorState = field(default_factory=IRSensorState)
 
     # Peripheral sensors
     button_pressed: bool = False

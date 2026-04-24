@@ -13,7 +13,7 @@ navigation and mobility systems.
 
 import asyncio
 import numpy as np
-from basehat import IMUSensor, UltrasonicSensor, Button
+from basehat import IMUSensor, UltrasonicSensor, Button, IRSensor
 from .state import State
 
 
@@ -33,6 +33,8 @@ class SensorInput:
         ultrasonic (bool): Enable all ultrasonic sensors (default: True)
         button_pin (int): GPIO pin for button (default: 22)
         button (bool): Enable button (default: False)
+        ir_sensor_pin (int): Analog port number for IR sensor (default: 0); pin+1 is used automatically
+        ir_sensor (bool): Enable IR sensor (default: False)
     
     Attributes:
         imu: IMUSensor instance or None
@@ -40,6 +42,7 @@ class SensorInput:
         ultrasonic_right: UltrasonicSensor instance or None
         ultrasonic_center: UltrasonicSensor instance or None
         button_sensor: Button instance or None
+        ir_sensor: IRSensor instance or None
     """
     
     def __init__(self, state: State, **kwargs):
@@ -65,6 +68,13 @@ class SensorInput:
             self.button_sensor = Button(button_pin)
         else:
             self.button_sensor = None
+
+        # IR sensor (disabled by default)
+        if kwargs.get("ir_sensor", False):
+            ir_pin = kwargs.get("ir_sensor_pin", 0)
+            self.ir_sensor = IRSensor(ir_pin, ir_pin + 1)
+        else:
+            self.ir_sensor = None
         
         # Cached sensor values
         self._gyro = np.array([0.0, 0.0, 0.0])
@@ -72,6 +82,8 @@ class SensorInput:
         self._dist_left = -1.0
         self._dist_right = -1.0
         self._dist_center = -1.0
+        self._ir_value1 = -1
+        self._ir_value2 = -1
         
         # Centralized state
         self.state = state
@@ -183,7 +195,27 @@ class SensorInput:
             return False
         
         return self.button_sensor.is_pressed
-    
+
+    # -------------------------------------------------------------------------
+    # IR Sensor Methods
+    # -------------------------------------------------------------------------
+
+    async def get_ir_values(self):
+        """
+        Get readings from both IR sensor elements.
+
+        Returns:
+            tuple: (value1, value2) each in range 0-255, or (-1, -1) if unavailable
+        """
+        if self.ir_sensor is None:
+            return (-1, -1)
+
+        self._ir_value1 = self.ir_sensor.value1
+        self._ir_value2 = self.ir_sensor.value2
+        self.state.sensors.ir_sensor.value1 = self._ir_value1
+        self.state.sensors.ir_sensor.value2 = self._ir_value2
+        return (self._ir_value1, self._ir_value2)
+
     # -------------------------------------------------------------------------
     # Utility Methods
     # -------------------------------------------------------------------------
@@ -203,6 +235,10 @@ class SensorInput:
     def has_button(self):
         """Check if button is available."""
         return self.button_sensor is not None
+
+    def has_ir_sensor(self):
+        """Check if IR sensor is available."""
+        return self.ir_sensor is not None
 
     # -------------------------------------------------------------------------
     # State Update Methods
@@ -234,6 +270,11 @@ class SensorInput:
         # Update button state
         if self.button_sensor is not None:
             self.state.sensors.button_pressed = self.button_sensor.is_pressed
+
+        # Update IR sensor values
+        if self.ir_sensor is not None:
+            self.state.sensors.ir_sensor.value1 = self.ir_sensor.value1
+            self.state.sensors.ir_sensor.value2 = self.ir_sensor.value2
 
     async def setup(self):
         """

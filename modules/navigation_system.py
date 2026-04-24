@@ -211,15 +211,20 @@ class Location:
 
     async def _compute_sensor_poses(self):
         """
-        Compute world-frame pose for each ultrasonic sensor from the robot's current
-        pose and the sensor-to-IMU mount transforms stored in SensorState.
+        Compute world-frame pose for each ultrasonic sensor and world-frame
+        position for the IR sensor from the robot's current pose and the
+        sensor-to-IMU mount transforms stored in SensorState.
 
-        For each sensor:
+        For each ultrasonic sensor:
           1. Position transform:
              world_pos = robot_position + R_robot @ local_position
           2. Orientation transform:
              R_world = R_robot @ R_sensor_local
              world_orient = euler(R_world)
+
+        For the IR sensor (no orientation):
+          1. Position transform only:
+             world_pos = robot_position + R_robot @ local_position
         """
         R_robot = await self.transformer.get_rotation(orientation=self.state.nav.orientation)
 
@@ -236,6 +241,10 @@ class Location:
 
             sensor.world_position = world_pos
             sensor.world_orientation = world_orient
+
+        # IR sensor — position only, no orientation
+        ir = self.state.sensors.ir_sensor
+        ir.world_position = self.state.nav.position + np.matmul(R_robot, ir.local_position)
     
     async def update(self, dt: float = 0.1):
         """Update both orientation and position."""
