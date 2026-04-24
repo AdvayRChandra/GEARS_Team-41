@@ -18,6 +18,7 @@ import asyncio
 import numpy as np
 import math
 from .state import State
+from .motion import MotionController
 
 
 class Transformation:
@@ -192,3 +193,58 @@ class Location:
         await self.update_orientation(dt=dt)
         await self.update_position(dt=dt)
         return True
+    
+class Navigation:
+    def __init__(self, state: State, motion: MotionController, **kwargs):
+        self.state = state
+        self.motion = motion
+        self.angle_tolerance = kwargs.get("angle_tolerance", 5.0)
+        self._log = []
+
+    async def go_to(self, destination):
+        """
+        Navigate to a 2D destination by first rotating to face it, then driving forward.
+
+        Args:
+            destination: Target position [x, y] or [x, y, z]. Only x/y are used.
+        """
+        dest_x = float(destination[0])
+        dest_y = float(destination[1])
+
+        # Phase 1: Rotate to face the destination.
+        while True:
+            cur_x = self.state.nav.position[0]
+            cur_y = self.state.nav.position[1]
+            dx = dest_x - cur_x
+            dy = dest_y - cur_y
+
+            target_yaw = math.degrees(math.atan2(dy, dx))
+            current_yaw = self.state.nav.orientation[0]
+            angle_error = (target_yaw - current_yaw + 180) % 360 - 180
+
+            if abs(angle_error) <= self.angle_tolerance:
+                self.motion.stop()
+                break
+
+            if angle_error > 0:
+                self.motion.turn_left()
+            else:
+                self.motion.turn_right()
+
+            await asyncio.sleep(0)
+
+        # Snapshot position after the turn to measure travel distance.
+        start = np.array([self.state.nav.position[0], self.state.nav.position[1]])
+        total_distance = math.sqrt((dest_x - start[0]) ** 2 + (dest_y - start[1]) ** 2)
+
+        # Phase 2: Drive forward until the required distance is covered.
+        while True:
+            cur = np.array([self.state.nav.position[0], self.state.nav.position[1]])
+            traveled = float(np.linalg.norm(cur - start))
+
+            if traveled >= total_distance:
+                self.motion.stop()
+                break
+
+            self.motion.forward()
+            await asyncio.sleep(0)

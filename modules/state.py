@@ -30,17 +30,17 @@ class MotorState:
 
 @dataclass
 class SensorState:
-    # IMU (raw)
-    acceleration_raw: np.ndarray = field(default_factory=_zero_vector)
+    # IMU (gyroscope and magnetometer)
     angular_velocity_raw: np.ndarray = field(default_factory=_zero_vector)
     magnetic_field: float = 0.0
 
+    # Ultrasonic sensors
+    ultrasonic_left: float = -1.0
+    ultrasonic_right: float = -1.0
+    ultrasonic_center: float = -1.0
+
     # Peripheral sensors
-    ultrasonic_distance: float = -1.0
-    lf_left_value: float = 0.0
-    lf_right_value: float = 0.0
     button_pressed: bool = False
-    color_sensor_value: int = -1
 
 
 @dataclass

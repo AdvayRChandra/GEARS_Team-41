@@ -7,6 +7,7 @@ class MotionController:
 
     def __init__(self, state: State, **kwargs):
         self.state = state
+        self.speed = kwargs.get("speed", 50)
         self.motor_left = Motor('A')   # Left motor  — port A
         self.motor_right = Motor('B')  # Right motor — port B
 
@@ -21,43 +22,39 @@ class MotionController:
         """Sync motor state once. Call this each control loop tick."""
         self._sync_state()
 
-    def _set_moving(self, moving: bool):
-        """Directly set is_moving on both motor state entries."""
-        self.state.motor_left.is_moving = moving
-        self.state.motor_right.is_moving = moving
+    def _drive(self, left: int, right: int):
+        """Start both motors at the given signed speeds, then sync state."""
+        self.motor_left.start(left)
+        self.motor_right.start(right)
+        self.state.motor_left.is_moving = True
+        self.state.motor_right.is_moving = True
+        self._sync_state()
 
-    def forward(self, speed: int = 50):
+    def forward(self, speed: int = None):
         """Drive both motors forward."""
-        self.motor_left.start(speed)
-        self.motor_right.start(speed)
-        self._set_moving(True)
-        self._sync_state()
+        s = speed if speed is not None else self.speed
+        self._drive(s, s)
 
-    def backward(self, speed: int = 50):
+    def backward(self, speed: int = None):
         """Drive both motors backward."""
-        self.motor_left.start(-speed)
-        self.motor_right.start(-speed)
-        self._set_moving(True)
-        self._sync_state()
+        s = speed if speed is not None else self.speed
+        self._drive(-s, -s)
 
-    def turn_left(self, speed: int = 50):
+    def turn_left(self, speed: int = None):
         """Pivot left: left motor backward, right motor forward."""
-        self.motor_left.start(-speed)
-        self.motor_right.start(speed)
-        self._set_moving(True)
-        self._sync_state()
+        s = speed if speed is not None else self.speed
+        self._drive(-s, s)
 
-    def turn_right(self, speed: int = 50):
+    def turn_right(self, speed: int = None):
         """Pivot right: left motor forward, right motor backward."""
-        self.motor_left.start(speed)
-        self.motor_right.start(-speed)
-        self._set_moving(True)
-        self._sync_state()
+        s = speed if speed is not None else self.speed
+        self._drive(s, -s)
 
     def stop(self):
         """Stop both motors."""
         self.motor_left.stop()
         self.motor_right.stop()
-        self._set_moving(False)
+        self.state.motor_left.is_moving = False
+        self.state.motor_right.is_moving = False
         self._sync_state()
 
