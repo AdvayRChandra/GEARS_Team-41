@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-24
+
+### Added
+- `UltrasonicSensorState` dataclass in `modules/state.py` holding `distance`, `local_position`, `local_orientation`, `world_position`, and `world_orientation` per sensor
+- `SensorInput.setup()` in `modules/sensors.py` primes `State` with an initial sensor reading before the update loop starts
+- `SensorInput.get_distance_left()`, `get_distance_right()`, `get_distance_center()` replace the single `get_distance()` method; each writes directly to the corresponding `UltrasonicSensorState`
+- `Location._euler_from_matrix()` in `modules/navigation_system.py` extracts `[yaw, pitch, roll]` from a ZYX rotation matrix with gimbal-lock handling
+- `Location._compute_sensor_poses()` computes world-frame position and orientation for each ultrasonic sensor each tick using the robot's current pose and mount transforms stored in `SensorState`
+- `Location.setup()` snapshots current motor positions as the odometry baseline; replaces implicit zero-initialization
+- `Location.run_location_update()` continuous async loop that drives `update()` at a configurable interval using a wall-clock `dt`
+- `Navigation` class in `modules/navigation_system.py` replaces the former thin update-loop wrapper; provides waypoint navigation (`go_to()`), world-frame obstacle projection (`get_obstacle_positions()`), timestamped pose logging, `setup()`, and `run_navigation_update()`
+- `MotionController.setup()` async method in `modules/motion.py` syncs motor state once before the update loop
+- `MotionController.run_motor_update()` continuous async loop that keeps `state.motor_left/right.position` and `is_moving` fresh between drive commands, preventing stale odometry during coasting
+- `MotionController.speed` instance attribute set from `kwargs.get("speed", 50)` as the default speed for all movement commands
+- `__main__` entry point in `modules/navigation_system.py` demonstrating concurrent async task setup with `SensorInput`, `Location`, `MotionController`, and `Navigation`
+
+### Changed
+- `SensorState` in `modules/state.py` replaces `ultrasonic_distance` (scalar), `lf_left_value`, `lf_right_value`, and `color_sensor_value` with three `UltrasonicSensorState` sub-objects (`ultrasonic_left`, `ultrasonic_right`, `ultrasonic_center`); removes `acceleration_raw`
+- `SensorInput.__init__()` in `modules/sensors.py` now requires `state: State` as an explicit argument; replaces single ultrasonic sensor with three sensors on configurable pins (`ultrasonic_left_pin` default 16, `ultrasonic_right_pin` default 5, `ultrasonic_center_pin` default 26); removes `LineFinder` and `ColorSensor` support
+- `SensorInput.get_gyro()` and `get_mag()` now write directly to `state.sensors` on each call in addition to returning the value
+- `SensorInput.has_ultrasonic()` updated to return `True` only when all three ultrasonic sensors are initialized
+- `SensorInput.update_state()` simplified: removed accelerometer, line finder, and color sensor branches; writes to the three `UltrasonicSensorState` sub-objects
+- `Location.update_position()` in `modules/navigation_system.py` now calls `_compute_sensor_poses()` after computing the robot pose each tick
+- `MotionController._set_moving()` replaced by `_drive()` which issues `start()` on both motors, sets `is_moving`, and syncs state in one call
+- `MotionController.forward()`, `backward()`, `turn_left()`, `turn_right()` now accept `speed: int = None` and fall back to `self.speed` instead of a hardcoded default of 50
+
+### Removed
+- `SensorInput.get_accel()` — accelerometer data is no longer read or stored
+- `SensorInput.get_distance()` — replaced by `get_distance_left/right/center()`
+- `SensorInput.get_color()`, `is_black()`, `has_color_sensor()` — `ColorSensor` support removed
+- `SensorInput.get_hall_value()`, `has_hall()` — deprecated Hall sensor stubs removed
+- `SensorInput.get_line_left()`, `get_line_right()`, `has_line_finders()` — `LineFinder` support removed
+- `MotionController._set_moving()` — replaced by `_drive()`
+
 ## [0.1.0] - 2026-04-24
 
 ### Added
