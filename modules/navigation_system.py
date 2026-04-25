@@ -15,6 +15,9 @@ Classes:
 """
 
 import asyncio
+import csv
+import glob
+import os
 import numpy as np
 import math
 from .state import State
@@ -442,6 +445,7 @@ class Map:
         self.magnetic_threshold: float = map_cfg.magnetic_threshold
         self.ir_threshold: int = map_cfg.ir_threshold
         self.state: State = state
+        self.config = config
         self.grid_width = int(map_cfg.map_width / self.resolution)
         self.grid_height = int(map_cfg.map_height / self.resolution)
         self.origin = map_cfg.origin if map_cfg.origin is not None else (self.grid_width // 2, self.grid_height // 2)
@@ -460,9 +464,14 @@ class Map:
         self.grid[self.origin[1], self.origin[0]] = 5  # Mark the origin (starting position)
 
     def _world_to_grid(self, world_x: float, world_y: float):
-        """Convert world-frame coordinates (meters) to grid indices, offset by origin."""
+        """Convert world-frame coordinates (meters) to grid indices.
+
+        X maps to column: increasing world x → increasing column (left to right).
+        Y maps to row: increasing world y → decreasing row (bottom to top),
+        because row 0 is the top of the array.
+        """
         grid_x = self.origin[0] + int(world_x / self.resolution)
-        grid_y = self.origin[1] + int(world_y / self.resolution)
+        grid_y = self.origin[1] - int(world_y / self.resolution)
         return grid_x, grid_y
 
     def update_path(self):
@@ -506,6 +515,55 @@ class Map:
             grid_x, grid_y = self._world_to_grid(mag_pos[0], mag_pos[1])
             if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
                 self.grid[grid_y, grid_x] = 3  # Magnetic source
+    
+    def save_map(self, notes: str = "") -> str:
+        """Save the current grid map to maps/team{team}_map{map_id}.csv.
+
+        The maps/ folder is created if it does not exist. The map_id is assigned
+        sequentially based on existing files already in the folder.
+
+        Args:
+            notes: Optional freeform notes written to the CSV header (default: "").
+
+        Returns:
+            The path to the saved file.
+        """
+        map_cfg = self.config.map
+        team = map_cfg.team
+        unit_length = map_cfg.unit_length
+        unit = map_cfg.unit
+        origin_str = f"({self.origin[0]},{self.origin[1]})"
+
+        os.makedirs("maps", exist_ok=True)
+        existing = glob.glob(f"maps/team{team}_map*.csv")
+        if existing:
+            ids = []
+            prefix = f"team{team}_map"
+            for p in existing:
+                base = os.path.splitext(os.path.basename(p))[0]
+                if base.startswith(prefix):
+                    try:
+                        ids.append(int(base[len(prefix):]))
+                    except ValueError:
+                        pass
+            map_id = max(ids) + 1 if ids else 0
+        else:
+            map_id = 0
+
+        filename = f"maps/team{team}_map{map_id}.csv"
+        with open(filename, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([f"Team: {team}"])
+            writer.writerow([f"Map: {map_id}"])
+            writer.writerow([f"Unit Length: {unit_length}"])
+            writer.writerow([f"Unit: {unit}"])
+            writer.writerow([f"Origin: {origin_str}"])
+            writer.writerow([f"Notes: {notes}"])
+            for row in self.grid:
+                writer.writerow(row.tolist())
+
+        return filename
+
 
 if __name__ == "__main__":
     # Run from the project root as:  python -m modules.navigation_system
@@ -535,6 +593,7 @@ if __name__ == "__main__":
             )
 
     async def main():
+        global navigation
         state = State()
         config = RobotConfig()
 
@@ -567,7 +626,18 @@ if __name__ == "__main__":
             await asyncio.gather(*tasks, return_exceptions=True)
             print("\nShutdown complete.")
 
+    save_map_flag = input("Save map after run? (y/n): ").strip().lower() == "y"
+    map_notes = ""
+    if save_map_flag:
+        map_notes = input("Enter notes for the map: ").strip()
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+
+    if save_map_flag:
+        # navigation is defined inside main() so we reach the map via the module-level
+        # State; re-instantiate Map with the same config just to write the grid.
+        path = navigation.map.save_map(notes=map_notes)
+        print(f"Map saved to {path}")

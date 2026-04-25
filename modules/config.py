@@ -153,6 +153,10 @@ class MapConfig:
             marked as a heat source (default: 500).
         origin: Grid-index (col, row) that corresponds to world position (0, 0).
             Defaults to None, which places the origin at the grid center.
+        team: Team identifier written to the map CSV header (default: 0).
+        unit_length: Physical size of one grid cell written to the CSV header
+            (default: 1).
+        unit: Unit string for unit_length written to the CSV header (default: "cm").
     """
     map_width: float = 10.0
     map_height: float = 10.0
@@ -160,6 +164,9 @@ class MapConfig:
     magnetic_threshold: float = 1000.0
     ir_threshold: int = 500
     origin: Optional[Tuple[int, int]] = None
+    team: int = 0
+    unit_length: int = 1
+    unit: str = "cm"
 
 
 @dataclass
