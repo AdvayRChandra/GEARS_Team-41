@@ -157,6 +157,17 @@ class Location:
 
         self.transformer = Transformation(mode=self.mode)
     
+    _DISCRETE_DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]]
+
+    def _compute_discrete_orientation(self, yaw) -> list:
+        """Snap a continuous yaw angle to the nearest cardinal direction.
+
+        Returns one of: [1,0] (+X), [0,1] (+Y), [-1,0] (-X), [0,-1] (-Y).
+        """
+        yaw_deg = yaw if self.mode == "degrees" else math.degrees(yaw)
+        idx = round((yaw_deg % 360) / 90) % 4
+        return self._DISCRETE_DIRS[idx]
+
     async def update_orientation(self, dt: float = 0.1):
         gyro_raw = self.state.sensors.angular_velocity_raw
         gyro = await self.transformer.rotate_vector(
@@ -170,6 +181,10 @@ class Location:
         )
         self.state.nav.angular_acceleration = (gyro - self.state.nav.angular_velocity) / dt
         self.state.nav.angular_velocity = gyro
+
+        self.state.nav.discrete_orientation = self._compute_discrete_orientation(
+            self.state.nav.orientation[0]
+        )
 
         return True
     
@@ -338,12 +353,16 @@ class Navigation:
 
     async def get_obstacle_positions(self) -> dict:
         """
-        Project each ultrasonic reading into the global frame.
+        Project each ultrasonic reading into the global frame using the robot's
+        discrete orientation so obstacle positions are snapped to cardinal
+        directions on the map grid.
 
-        For each sensor with a valid distance reading, computes the world-frame
-        position of the detected surface:
-
-            obstacle = sensor.world_position + R(sensor.world_orientation) @ [distance, 0, 0]
+        The robot's discrete heading (state.nav.discrete_orientation) defines
+        the forward cardinal direction [dx, dy].  Each sensor's facing vector
+        is derived from that:
+            center → forward:        [ dx,  dy, 0]
+            left   → CCW 90° turn:   [-dy,  dx, 0]
+            right  → CW  90° turn:   [ dy, -dx, 0]
 
         Sensors reporting distance == -1.0 are skipped (no detection / timeout).
 
@@ -352,6 +371,13 @@ class Navigation:
             np.ndarray [x, y, z] in meters (global frame) or None if that sensor
             had no valid reading.
         """
+        dx, dy = self.state.nav.discrete_orientation
+        discrete_facings = {
+            "center": np.array([ dx,  dy, 0.0]),
+            "left":   np.array([-dy,  dx, 0.0]),
+            "right":  np.array([ dy, -dx, 0.0]),
+        }
+
         result = {}
         for side in ("left", "right", "center"):
             sensor = getattr(self.state.sensors, f"ultrasonic_{side}")
@@ -359,11 +385,9 @@ class Navigation:
                 result[side] = None
                 continue
 
-            # Sensor faces along its local +X axis; distance is in centimeters.
+            # Sensor faces along its discrete cardinal direction; distance is in centimeters.
             distance_m = sensor.distance / 100.0
-            R_sensor = await self.transformer.get_rotation(orientation=sensor.world_orientation)
-            facing = np.matmul(R_sensor, np.array([1.0, 0.0, 0.0]))
-            result[side] = sensor.world_position + facing * distance_m
+            result[side] = sensor.world_position + discrete_facings[side] * distance_m
 
         return result
 
@@ -457,8 +481,17 @@ class Navigation:
 
         while True:
             await asyncio.sleep(update_interval)
-            self._obstacles = await self.get_obstacle_positions()
-            self.map.update_obstacles(self._obstacles)
+
+            # Only map obstacles when the robot is settled on a cardinal heading.
+            # Compare continuous yaw to the nearest 90° multiple; skip if the
+            # error exceeds angle_tolerance to avoid recording mid-turn readings.
+            yaw_deg = self.state.nav.orientation[0]
+            nearest_cardinal = round(yaw_deg / 90) * 90
+            heading_error = abs((yaw_deg - nearest_cardinal + 180) % 360 - 180)
+            if heading_error <= self.angle_tolerance:
+                self._obstacles = await self.get_obstacle_positions()
+                self.map.update_obstacles(self._obstacles)
+
             self.map.update_path()
             self._log.append({
                 "time": loop.time(),
@@ -517,21 +550,48 @@ class Map:
 
     def update_obstacles(self, obstacles: dict):
         """
-        Update the grid with pre-computed world-frame obstacle positions.
+        Update the grid with obstacle detections.
+
+        Ultrasonic obstacles use grid arithmetic rather than continuous world
+        coordinates: the robot's current grid cell is used as the origin and
+        the discrete heading is used to step exactly N cells to the obstacle.
+        This avoids sub-cell sensor-mount offsets misplacing walls at 10 cm
+        resolution.
+
+        Grid direction mapping from world discrete heading [dx, dy]:
+            center → (+dx, -dy)    (forward)
+            left   → (-dy, -dx)    (CCW 90°)
+            right  → (+dy, +dx)    (CW 90°)
+        The sign flip on dy arises because grid rows increase downward while
+        world Y increases upward.
+
+        IR and magnetic sensors are placed at their continuous world positions
+        (no directional projection needed).
 
         Args:
-            obstacles: Dict with keys "left", "right", "center" mapping to
-                np.ndarray world positions (or None if no detection).
+            obstacles: Dict with keys "left", "right", "center" — used only as
+                a None sentinel (None means no valid reading for that side).
         """
-        # Ultrasonic obstacles — positions already projected into world frame
+        # Ultrasonic obstacles — grid arithmetic from robot cell + discrete direction
+        dx, dy = self.state.nav.discrete_orientation
+        robot_gx, robot_gy = self._world_to_grid(
+            self.state.nav.position[0], self.state.nav.position[1]
+        )
+        side_grid_dirs = {
+            "center": ( dx, -dy),
+            "left":   (-dy, -dx),
+            "right":  ( dy,  dx),
+        }
         for side in ("left", "right", "center"):
-            obstacle_pos = obstacles.get(side)
-            if obstacle_pos is None:
+            if obstacles.get(side) is None:
                 continue
             sensor = getattr(self.state.sensors, f"ultrasonic_{side}")
             if sensor.distance < 0.0:
                 continue
-            grid_x, grid_y = self._world_to_grid(obstacle_pos[0], obstacle_pos[1])
+            cells = round((sensor.distance / 100.0) / self.resolution)
+            gcol, grow = side_grid_dirs[side]
+            grid_x = robot_gx + gcol * cells
+            grid_y = robot_gy + grow * cells
             if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
                 self.grid[grid_y, grid_x] = 6  # Wall
 

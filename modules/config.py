@@ -180,7 +180,7 @@ class MapConfig:
         x_max: Maximum x coordinate of the mapped area in meters (default: 10.0).
         y_min: Minimum y coordinate of the mapped area in meters (default: -10.0).
         y_max: Maximum y coordinate of the mapped area in meters (default: 10.0).
-        resolution: Meters per grid cell (default: 0.01 → 1 cm/cell).
+        resolution: Meters per grid cell (default: 0.10 → 10 cm/cell).
         magnetic_threshold: Magnetic field reading above which a cell is marked
             as a magnetic source (default: 1000.0).
         ir_threshold: IR sensor value (0–999) above which the sensor position is
@@ -194,11 +194,11 @@ class MapConfig:
     x_max: float = 10.0
     y_min: float = -10.0
     y_max: float = 10.0
-    resolution: float = 0.01
+    resolution: float = 0.10
     magnetic_threshold: float = 1000.0
     ir_threshold: int = 500
     team: int = 0
-    unit_length: int = 1
+    unit_length: int = 10
     unit: str = "cm"
 
 

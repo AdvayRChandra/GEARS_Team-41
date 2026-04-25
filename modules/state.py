@@ -88,6 +88,9 @@ class NavigationState:
     orientation: np.ndarray = field(default_factory=_zero_vector)
     angular_velocity: np.ndarray = field(default_factory=_zero_vector)
     angular_acceleration: np.ndarray = field(default_factory=_zero_vector)
+    # Discrete 2D heading snapped to the nearest cardinal direction:
+    # [1, 0]=+X  [-1, 0]=-X  [0, 1]=+Y  [0, -1]=-Y
+    discrete_orientation: list = field(default_factory=lambda: [1, 0])
 
 
 @dataclass
