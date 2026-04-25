@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `IMUSensorConfig` dataclass in `modules/config.py` — position-only mount transform (base → magnetic sensor); no orientation field so gyroscope readings are structurally unaffected
+- `SensorConfig.imu` field (`IMUSensorConfig`) in `modules/config.py` with default zero offset
+- `SensorState.mag_world_position` (`np.ndarray`) in `modules/state.py` — world-frame position of the magnetometer, updated each tick
+- `IRSensorState.value` field replaces the former `value1`/`value2` fields; each element now has its own `IRSensorState` instance with an independent `world_position`
+- `SensorConfig.ir_sensor_left` and `SensorConfig.ir_sensor_right` (`IRSensorConfig`) in `modules/config.py` — each element has its own `pin` and `local_position`; `ir_sensor_right` defaults to pin 3
+- `SensorState.ir_sensor_left` and `SensorState.ir_sensor_right` (`IRSensorState`) in `modules/state.py`
+- `Navigation`, `Map`, `IMUSensorConfig`, `MapConfig`, `UltrasonicSensorState`, `IRSensorState` added to `modules/__init__.py` exports
+
+### Changed
+- `Map.update_obstacles()` in `modules/navigation_system.py` — magnetic hazard now mapped at `state.sensors.mag_world_position` (magnetometer world position) instead of the robot's base position
+- `Map.update_obstacles()` — IR heat sources now mapped independently at each element's own `world_position`; each element is checked against `ir_threshold` separately
+- `Location._compute_sensor_poses()` — computes separate world positions for `ir_sensor_left` and `ir_sensor_right` using their respective `local_position` offsets; computes `mag_world_position` from `config.sensors.imu.local_position`
+- `SensorInput.__init__()` — `IRSensor` now constructed with `ir_sensor_left.pin` and `ir_sensor_right.pin` instead of `ir_sensor_left.pin + 1` hardcoded
+- `SensorInput.get_ir_values()` and `update_state()` write to `ir_sensor_left.value` / `ir_sensor_right.value` instead of the former `ir_sensor.value1` / `ir_sensor.value2`
+- `modules/config.py` module docstring tree updated to reflect `ir_sensor_left`, `ir_sensor_right`, and `imu` fields on `SensorConfig`
+
+### Removed
+- `SensorConfig.ir_sensor` (`IRSensorConfig`) — replaced by `ir_sensor_left` and `ir_sensor_right`
+- `IRSensorState.value1` / `IRSensorState.value2` — replaced by a single `value` field; left and right elements are now separate `IRSensorState` instances
+
 ## [0.3.0] - 2026-04-25
 
 ### Added
