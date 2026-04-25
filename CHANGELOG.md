@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-25
+
+### Added
+- `modules/config.py` — new configuration module with `RobotConfig`, `MotorConfig`, `SensorConfig`, `UltrasonicSensorConfig`, and `IRSensorConfig` dataclasses; centralizes all static hardware configuration (pins, mount offsets, wheel diameter, motor ports, angle tolerance, initial pose)
+- `basehat/IRSensor.py` — `IRSensor` class for dual-channel analog IR sensing via Grove BaseHAT ADC
+- `basehat/HallSensor.py` — `HallSensor` class wrapping `gpiozero.Button` for Hall-effect magnet detection
+- `basehat/LightSensor.py` — `LightSensor` class for Grove analog light sensing (0–1000 range)
+- `basehat/template.py` — contributor template for new sensor/motor basehat modules
+- `examples/IRSensor_Example.py` — standalone usage example for `IRSensor`
+- `IRSensorState` dataclass in `modules/state.py` holding `value1`, `value2` (0–999 IR readings), and `world_position`
+- `SensorState.ir_sensor` field (`IRSensorState`) in `modules/state.py`
+- `SensorInput.ir_sensor` attribute, `get_ir_values()`, and `has_ir_sensor()` in `modules/sensors.py`; `update_state()` writes both IR values to `state.sensors.ir_sensor`
+- `_flush_serial()` helper in `modules/motion.py` — discards accumulated BuildHAT serial buffer data before `Motor` initialization to prevent `BuildHATError` on startup
+- IR sensor world-position computation in `Location._compute_sensor_poses()` using `IRSensorConfig.local_position`
+
+### Changed
+- `SensorInput.__init__()`, `Location.__init__()`, `Navigation.__init__()`, and `MotionController.__init__()` signatures changed from `**kwargs` to an explicit `config: RobotConfig` parameter; all hardware options (pins, ports, speeds, tolerances, initial pose) are now read from `config` instead of keyword arguments
+- `MotionController.__init__()` now calls `_flush_serial()` before constructing `Motor` instances; motor ports sourced from `config.motors.port_left/right`
+- `UltrasonicSensorState` in `modules/state.py` stripped of `local_position` and `local_orientation` fields (static mount config moved to `UltrasonicSensorConfig` in `config.py`)
+- `State.mode` field removed; angle unit mode is now owned by `RobotConfig.mode`
+- `Location._compute_sensor_poses()` reads ultrasonic mount transforms from `RobotConfig.sensors` instead of `UltrasonicSensorState`; `Navigation.transformer` now uses `config.mode`
+- `__main__` entry point in `modules/navigation_system.py` updated to instantiate `RobotConfig` and pass it to all components; display loop now shows IR values and magnetic field
+- `modules/state.py` module docstring updated to clarify the state/config separation
+
+### Renamed
+- `basehat/button.py` → `basehat/Button.py`
+- `basehat/imu_sensor.py` → `basehat/IMUSensor.py`
+- `basehat/line_finder.py` → `basehat/LineFinder.py`
+- `basehat/ultrasonic_sensor.py` → `basehat/UltrasonicSensor.py`
+
 ## [0.2.0] - 2026-04-24
 
 ### Added
