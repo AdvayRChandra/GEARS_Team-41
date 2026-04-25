@@ -134,6 +134,7 @@ class SensorConfig:
     imu: IMUSensorConfig = field(
         default_factory=lambda: IMUSensorConfig(
             local_position=np.array([0.0, 0.0, 0.0]),
+            local_orientation=np.array([0.0, 0.0, 90.0]),
         )
     )
     ultrasonic_left: UltrasonicSensorConfig = field(
