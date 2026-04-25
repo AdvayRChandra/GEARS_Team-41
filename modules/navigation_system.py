@@ -552,11 +552,15 @@ class Map:
         """
         Update the grid with obstacle detections.
 
+        Overwrite rules (by priority, highest first):
+          - 4 (destination) and 5 (origin): never overridden by anything.
+          - 1 (path): never overridden by any detection.
+          - 2 (heat) / 3 (magnetic): override walls (6) and unknown (0).
+          - 6 (wall): written only onto unknown cells (0).
+
         Ultrasonic obstacles use grid arithmetic rather than continuous world
         coordinates: the robot's current grid cell is used as the origin and
         the discrete heading is used to step exactly N cells to the obstacle.
-        This avoids sub-cell sensor-mount offsets misplacing walls at 10 cm
-        resolution.
 
         Grid direction mapping from world discrete heading [dx, dy]:
             center → (+dx, -dy)    (forward)
@@ -572,6 +576,8 @@ class Map:
             obstacles: Dict with keys "left", "right", "center" — used only as
                 a None sentinel (None means no valid reading for that side).
         """
+        _PROTECTED = {1, 4, 5}  # path, destination, origin — never overwritten
+
         # Ultrasonic obstacles — grid arithmetic from robot cell + discrete direction
         dx, dy = self.state.nav.discrete_orientation
         robot_gx, robot_gy = self._world_to_grid(
@@ -593,27 +599,31 @@ class Map:
             grid_x = robot_gx + gcol * cells
             grid_y = robot_gy + grow * cells
             if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
-                self.grid[grid_y, grid_x] = 6  # Wall
+                if self.grid[grid_y, grid_x] == 0:  # Wall only onto unknown cells
+                    self.grid[grid_y, grid_x] = 6
 
-        # IR sensor — mark heat source at each element's world position
+        # IR sensor — mark heat source; overrides walls but not path/origin/destination
         ir_left = self.state.sensors.ir_sensor_left
         ir_right = self.state.sensors.ir_sensor_right
         if ir_left.value >= self.ir_threshold:
             grid_x, grid_y = self._world_to_grid(ir_left.world_position[0], ir_left.world_position[1])
             if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
-                self.grid[grid_y, grid_x] = 2  # Heat source
+                if self.grid[grid_y, grid_x] not in _PROTECTED:
+                    self.grid[grid_y, grid_x] = 2  # Heat source
         if ir_right.value >= self.ir_threshold:
             grid_x, grid_y = self._world_to_grid(ir_right.world_position[0], ir_right.world_position[1])
             if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
-                self.grid[grid_y, grid_x] = 2  # Heat source
+                if self.grid[grid_y, grid_x] not in _PROTECTED:
+                    self.grid[grid_y, grid_x] = 2  # Heat source
 
-        # Magnetic source — mark at magnetometer world position
+        # Magnetic source — overrides walls but not path/origin/destination
         magnetic_field = self.state.sensors.magnetic_field
         if magnetic_field >= self.magnetic_threshold:
             mag_pos = self.state.sensors.mag_world_position
             grid_x, grid_y = self._world_to_grid(mag_pos[0], mag_pos[1])
             if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
-                self.grid[grid_y, grid_x] = 3  # Magnetic source
+                if self.grid[grid_y, grid_x] not in _PROTECTED:
+                    self.grid[grid_y, grid_x] = 3  # Magnetic source
     
     def save_map(self, notes: str = "") -> str:
         """Save the current grid map to maps/team{team}_map{map_id}.csv.
