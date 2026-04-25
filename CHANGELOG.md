@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-04-25
+
 ### Added
 - `MapConfig` dataclass in `modules/config.py` — static configuration for the 2D occupancy grid (`map_width`, `map_height`, `resolution`, `magnetic_threshold`, `ir_threshold`, `origin`, `team`, `unit_length`, `unit`)
 - `RobotConfig.map` field (`MapConfig`) in `modules/config.py`
