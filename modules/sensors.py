@@ -65,7 +65,7 @@ class SensorInput:
 
         # IR sensor (disabled by default)
         if sc.enable_ir_sensor:
-            self.ir_sensor = IRSensor(sc.ir_sensor.pin, sc.ir_sensor.pin + 1)
+            self.ir_sensor = IRSensor(sc.ir_sensor_left.pin, sc.ir_sensor_right.pin)
         else:
             self.ir_sensor = None
         
@@ -205,8 +205,8 @@ class SensorInput:
 
         self._ir_value1 = self.ir_sensor.value1
         self._ir_value2 = self.ir_sensor.value2
-        self.state.sensors.ir_sensor.value1 = self._ir_value1
-        self.state.sensors.ir_sensor.value2 = self._ir_value2
+        self.state.sensors.ir_sensor_left.value = self._ir_value1
+        self.state.sensors.ir_sensor_right.value = self._ir_value2
         return (self._ir_value1, self._ir_value2)
 
     # -------------------------------------------------------------------------
@@ -266,8 +266,8 @@ class SensorInput:
 
         # Update IR sensor values
         if self.ir_sensor is not None:
-            self.state.sensors.ir_sensor.value1 = self.ir_sensor.value1
-            self.state.sensors.ir_sensor.value2 = self.ir_sensor.value2
+            self.state.sensors.ir_sensor_left.value = self.ir_sensor.value1
+            self.state.sensors.ir_sensor_right.value = self.ir_sensor.value2
 
     async def setup(self):
         """

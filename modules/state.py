@@ -11,7 +11,8 @@ Structure:
     │   ├── ultrasonic_left: UltrasonicSensorState
     │   ├── ultrasonic_right: UltrasonicSensorState
     │   ├── ultrasonic_center: UltrasonicSensorState
-    │   ├── ir_sensor: IRSensorState
+    │   ├── ir_sensor_left: IRSensorState
+    │   ├── ir_sensor_right: IRSensorState
     │   └── mag_world_position: np.ndarray
     ├── nav: NavigationState        — computed pose, velocity, and orientation
     ├── motor_left: MotorState      — left motor (port A) position and motion status
@@ -49,15 +50,13 @@ class UltrasonicSensorState:
 
 @dataclass
 class IRSensorState:
-    """Runtime state for the IR sensor.
+    """Runtime state for a single IR sensor element.
 
     Attributes:
-        value1: Latest reading from the left IR element (0-999), or -1 if unavailable.
-        value2: Latest reading from the right IR element (0-999), or -1 if unavailable.
-        world_position: Sensor origin in global frame, meters [x, y, z]. Updated each tick.
+        value: Latest reading from this IR element (0-999), or -1 if unavailable.
+        world_position: Sensor element origin in global frame, meters [x, y, z]. Updated each tick.
     """
-    value1: int = -1  # 0-999
-    value2: int = -1  # 0-999
+    value: int = -1  # 0-999
     world_position: np.ndarray = field(default_factory=_zero_vector)
 
 
@@ -73,8 +72,9 @@ class SensorState:
     ultrasonic_right: UltrasonicSensorState = field(default_factory=UltrasonicSensorState)
     ultrasonic_center: UltrasonicSensorState = field(default_factory=UltrasonicSensorState)
 
-    # IR sensor
-    ir_sensor: IRSensorState = field(default_factory=IRSensorState)
+    # IR sensor (left = value1 / pin, right = value2 / pin+1)
+    ir_sensor_left: IRSensorState = field(default_factory=IRSensorState)
+    ir_sensor_right: IRSensorState = field(default_factory=IRSensorState)
 
     # Peripheral sensors
     button_pressed: bool = False

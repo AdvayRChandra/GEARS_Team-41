@@ -250,10 +250,13 @@ class Location:
             sensor_state.world_position = world_pos
             sensor_state.world_orientation = world_orient
 
-        # IR sensor — position only, no orientation
-        ir_state = self.state.sensors.ir_sensor
-        ir_cfg = self.config.sensors.ir_sensor
-        ir_state.world_position = self.state.nav.position + np.matmul(R_robot, ir_cfg.local_position)
+        # IR sensor left and right elements — position only, no orientation
+        self.state.sensors.ir_sensor_left.world_position = (
+            self.state.nav.position + np.matmul(R_robot, self.config.sensors.ir_sensor_left.local_position)
+        )
+        self.state.sensors.ir_sensor_right.world_position = (
+            self.state.nav.position + np.matmul(R_robot, self.config.sensors.ir_sensor_right.local_position)
+        )
 
         # IMU magnetic sensor — position only, no orientation (gyro unaffected)
         self.state.sensors.mag_world_position = (
@@ -508,12 +511,15 @@ class Map:
             if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
                 self.grid[grid_y, grid_x] = 6  # Wall
 
-        # IR sensor — mark heat source at sensor world position
-        ir_value1 = self.state.sensors.ir_sensor.value1
-        ir_value2 = self.state.sensors.ir_sensor.value2
-        if ir_value1 >= self.ir_threshold or ir_value2 >= self.ir_threshold:
-            ir_pos = self.state.sensors.ir_sensor.world_position
-            grid_x, grid_y = self._world_to_grid(ir_pos[0], ir_pos[1])
+        # IR sensor — mark heat source at each element's world position
+        ir_left = self.state.sensors.ir_sensor_left
+        ir_right = self.state.sensors.ir_sensor_right
+        if ir_left.value >= self.ir_threshold:
+            grid_x, grid_y = self._world_to_grid(ir_left.world_position[0], ir_left.world_position[1])
+            if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
+                self.grid[grid_y, grid_x] = 2  # Heat source
+        if ir_right.value >= self.ir_threshold:
+            grid_x, grid_y = self._world_to_grid(ir_right.world_position[0], ir_right.world_position[1])
             if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
                 self.grid[grid_y, grid_x] = 2  # Heat source
 
@@ -594,8 +600,8 @@ if __name__ == "__main__":
                 f"  dist left   : {s.ultrasonic_left.distance:.1f} cm\n"
                 f"  dist right  : {s.ultrasonic_right.distance:.1f} cm\n"
                 f"  dist center : {s.ultrasonic_center.distance:.1f} cm\n"
-                f"  IR left     : {'N/A (not detected)' if s.ir_sensor.value1 == -1 else s.ir_sensor.value1}\n"
-                f"  IR right    : {'N/A (not detected)' if s.ir_sensor.value2 == -1 else s.ir_sensor.value2}\n"
+                f"  IR left     : {'N/A (not detected)' if s.ir_sensor_left.value == -1 else s.ir_sensor_left.value}\n"
+                f"  IR right    : {'N/A (not detected)' if s.ir_sensor_right.value == -1 else s.ir_sensor_right.value}\n"
                 f"  magnetic    : {s.magnetic_field:.2f}\n"
                 f"  motor left  : pos={state.motor_left.position:.1f}  moving={state.motor_left.is_moving}\n"
                 f"  motor right : pos={state.motor_right.position:.1f}  moving={state.motor_right.is_moving}"

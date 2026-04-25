@@ -34,7 +34,9 @@ Structure:
         ├── ultrasonic_left: UltrasonicSensorConfig
         ├── ultrasonic_right: UltrasonicSensorConfig
         ├── ultrasonic_center: UltrasonicSensorConfig
-        └── ir_sensor: IRSensorConfig
+        ├── ir_sensor_left: IRSensorConfig
+        ├── ir_sensor_right: IRSensorConfig
+        └── imu: IMUSensorConfig
 """
 
 from __future__ import annotations
@@ -75,11 +77,11 @@ class UltrasonicSensorConfig:
 
 @dataclass
 class IRSensorConfig:
-    """Static configuration for the IR sensor.
+    """Static configuration for a single IR sensor element.
 
     Attributes:
-        pin: Analog port number; pin+1 is used automatically for value2.
-        local_position: Sensor origin offset from IMU in robot frame, meters [x, y, z].
+        pin: Analog port number for this element.
+        local_position: Sensor element origin offset from robot base in robot frame, meters [x, y, z].
     """
     pin: int = 0
     local_position: np.ndarray = field(default_factory=_zero_vector)
@@ -112,7 +114,8 @@ class SensorConfig:
         ultrasonic_left: Config for left ultrasonic sensor (default pin: 16).
         ultrasonic_right: Config for right ultrasonic sensor (default pin: 5).
         ultrasonic_center: Config for center ultrasonic sensor (default pin: 26).
-        ir_sensor: Config for IR sensor (default pin: 0).
+        ir_sensor_left: Config for the left IR element (pin, local_position).
+        ir_sensor_right: Config for the right IR element (local_position; uses pin+1 automatically).
     """
     enable_imu: bool = True
     enable_ultrasonic: bool = True
@@ -150,9 +153,15 @@ class SensorConfig:
             local_orientation=np.array([0.0, 0.0, 0.0]),
         )
     )
-    ir_sensor: IRSensorConfig = field(
+    ir_sensor_left: IRSensorConfig = field(
         default_factory=lambda: IRSensorConfig(
             pin=2,
+            local_position=np.array([0.0, 0.0, 0.0]),
+        )
+    )
+    ir_sensor_right: IRSensorConfig = field(
+        default_factory=lambda: IRSensorConfig(
+            pin=3,
             local_position=np.array([0.0, 0.0, 0.0]),
         )
     )
