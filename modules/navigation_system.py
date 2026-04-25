@@ -372,26 +372,9 @@ class Navigation:
         dest_y = float(destination[1])
 
         # Phase 1: Rotate to face the destination.
-        while True:
-            cur_x = self.state.nav.position[0]
-            cur_y = self.state.nav.position[1]
-            dx = dest_x - cur_x
-            dy = dest_y - cur_y
-
-            target_yaw = math.degrees(math.atan2(dy, dx))
-            current_yaw = self.state.nav.orientation[0]
-            angle_error = (target_yaw - current_yaw + 180) % 360 - 180
-
-            if abs(angle_error) <= self.angle_tolerance:
-                self.motion.stop()
-                break
-
-            if angle_error > 0:
-                self.motion.turn_left()
-            else:
-                self.motion.turn_right()
-
-            await asyncio.sleep(0)
+        target_yaw = math.degrees(math.atan2(dest_y - self.state.nav.position[1], dest_x - self.state.nav.position[0]))
+        angle_error = (target_yaw - self.state.nav.orientation[0] + 180) % 360 - 180
+        await self.turn_degrees(angle_error)
 
         # Snapshot position after the turn to measure travel distance.
         start = np.array([self.state.nav.position[0], self.state.nav.position[1]])
@@ -407,6 +390,33 @@ class Navigation:
                 break
 
             self.motion.forward()
+            await asyncio.sleep(0)
+
+    async def turn_degrees(self, degrees: float):
+        """
+        Turn the robot by a given number of degrees based on current orientation.
+
+        Uses turn_left for negative degrees and turn_right for positive degrees.
+        Stops once the target yaw is reached within angle_tolerance.
+
+        Args:
+            degrees (float): Degrees to turn. Positive = right, negative = left.
+        """
+        target_yaw = self.state.nav.orientation[0] + degrees
+
+        while True:
+            current_yaw = self.state.nav.orientation[0]
+            angle_error = (target_yaw - current_yaw + 180) % 360 - 180
+
+            if abs(angle_error) <= self.angle_tolerance:
+                self.motion.stop()
+                break
+
+            if degrees < 0:
+                self.motion.turn_left()
+            else:
+                self.motion.turn_right()
+
             await asyncio.sleep(0)
 
     async def setup(self):
@@ -458,9 +468,14 @@ class Map:
         self.ir_threshold: int = map_cfg.ir_threshold
         self.state: State = state
         self.config = config
-        self.grid_width = int(map_cfg.map_width / self.resolution)
-        self.grid_height = int(map_cfg.map_height / self.resolution)
-        self.origin = map_cfg.origin if map_cfg.origin is not None else (self.grid_width // 2, self.grid_height // 2)
+        self.x_min: float = map_cfg.x_min
+        self.y_max: float = map_cfg.y_max
+        self.grid_width = int((map_cfg.x_max - map_cfg.x_min) / self.resolution)
+        self.grid_height = int((map_cfg.y_max - map_cfg.y_min) / self.resolution)
+        self.origin = (
+            int(-map_cfg.x_min / self.resolution),
+            int(map_cfg.y_max / self.resolution),
+        )
 
         """
         2D occupancy grid representing the environment. Each cell can be:
@@ -482,8 +497,8 @@ class Map:
         Y maps to row: increasing world y → decreasing row (bottom to top),
         because row 0 is the top of the array.
         """
-        grid_x = self.origin[0] + int(world_x / self.resolution)
-        grid_y = self.origin[1] - int(world_y / self.resolution)
+        grid_x = int((world_x - self.x_min) / self.resolution)
+        grid_y = int((self.y_max - world_y) / self.resolution)
         return grid_x, grid_y
 
     def update_path(self):
@@ -586,14 +601,16 @@ if __name__ == "__main__":
     from .sensors import SensorInput
     from .config import RobotConfig
 
-    async def _display_loop(state: State, interval: float = 0.5):
+    async def _display_loop(state: State, map: 'Map', interval: float = 0.5):
         while True:
             await asyncio.sleep(interval)
             s = state.sensors
             n = state.nav
+            grid_x, grid_y = map._world_to_grid(n.position[0], n.position[1])
             print(
                 "\n--- State ---\n"
                 f"  position    : {n.position}\n"
+                f"  grid coords : ({grid_x}, {grid_y})\n"
                 f"  velocity    : {n.velocity}\n"
                 f"  orientation : {n.orientation}\n"
                 f"  gyro (raw)  : {s.angular_velocity_raw}\n"
@@ -627,7 +644,7 @@ if __name__ == "__main__":
             asyncio.create_task(location.run_location_update()),
             asyncio.create_task(motion.run_motor_update()),
             asyncio.create_task(navigation.run_navigation_update()),
-            asyncio.create_task(_display_loop(state)),
+            asyncio.create_task(_display_loop(state, navigation.map)),
         ]
 
         print("Running — press Ctrl+C to stop.\n")

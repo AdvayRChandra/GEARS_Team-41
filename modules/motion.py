@@ -51,22 +51,22 @@ class MotionController:
     def forward(self, speed: int = None):
         """Drive both motors forward."""
         s = speed if speed is not None else self.speed
-        self._drive(s, s)
+        self._drive(s, -s)
 
     def backward(self, speed: int = None):
         """Drive both motors backward."""
         s = speed if speed is not None else self.speed
-        self._drive(-s, -s)
-
-    def turn_left(self, speed: int = None):
-        """Pivot left: left motor backward, right motor forward."""
-        s = speed if speed is not None else self.speed
         self._drive(-s, s)
 
     def turn_right(self, speed: int = None):
+        """Pivot left: left motor backward, right motor forward."""
+        s = speed if speed is not None else self.speed
+        self._drive(-s, -s)
+
+    def turn_left(self, speed: int = None):
         """Pivot right: left motor forward, right motor backward."""
         s = speed if speed is not None else self.speed
-        self._drive(s, -s)
+        self._drive(s, s)
 
     def stop(self):
         """Stop both motors."""

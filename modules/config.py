@@ -21,8 +21,10 @@ Structure:
     ├── sensors: SensorConfig
     │   └── ...
     └── map: MapConfig
-        ├── map_width: float            — mapped area width in meters
-        ├── map_height: float           — mapped area height in meters
+        ├── x_min: float                — mapped area minimum x in meters
+        ├── x_max: float                — mapped area maximum x in meters
+        ├── y_min: float                — mapped area minimum y in meters
+        ├── y_max: float                — mapped area maximum y in meters
         ├── resolution: float           — meters per grid cell
         ├── magnetic_threshold: float   — field strength to mark magnetic source
         └── ir_threshold: int           — IR value (0–999) to mark heat source
@@ -141,14 +143,14 @@ class SensorConfig:
     )
     ultrasonic_right: UltrasonicSensorConfig = field(
         default_factory=lambda: UltrasonicSensorConfig(
-            pin=24,
+            pin=26,
             local_position=np.array([0.0, 0.0, 0.0]),
             local_orientation=np.array([-90.0, 0.0, 0.0]),
         )
     )
     ultrasonic_center: UltrasonicSensorConfig = field(
         default_factory=lambda: UltrasonicSensorConfig(
-            pin=26,
+            pin=24,
             local_position=np.array([0.0, 0.0, 0.0]),
             local_orientation=np.array([0.0, 0.0, 0.0]),
         )
@@ -172,26 +174,27 @@ class MapConfig:
     """Static configuration for the 2D occupancy grid map.
 
     Attributes:
-        map_width: Physical width of the mapped area in meters (default: 10.0).
-        map_height: Physical height of the mapped area in meters (default: 10.0).
+        x_min: Minimum x coordinate of the mapped area in meters (default: -10.0).
+        x_max: Maximum x coordinate of the mapped area in meters (default: 10.0).
+        y_min: Minimum y coordinate of the mapped area in meters (default: -10.0).
+        y_max: Maximum y coordinate of the mapped area in meters (default: 10.0).
         resolution: Meters per grid cell (default: 0.01 → 1 cm/cell).
         magnetic_threshold: Magnetic field reading above which a cell is marked
             as a magnetic source (default: 1000.0).
         ir_threshold: IR sensor value (0–999) above which the sensor position is
             marked as a heat source (default: 500).
-        origin: Grid-index (col, row) that corresponds to world position (0, 0).
-            Defaults to None, which places the origin at the grid center.
         team: Team identifier written to the map CSV header (default: 0).
         unit_length: Physical size of one grid cell written to the CSV header
             (default: 1).
         unit: Unit string for unit_length written to the CSV header (default: "cm").
     """
-    map_width: float = 10.0
-    map_height: float = 10.0
+    x_min: float = -10.0
+    x_max: float = 10.0
+    y_min: float = -10.0
+    y_max: float = 10.0
     resolution: float = 0.01
     magnetic_threshold: float = 1000.0
     ir_threshold: int = 500
-    origin: Optional[Tuple[int, int]] = None
     team: int = 0
     unit_length: int = 1
     unit: str = "cm"
