@@ -48,9 +48,9 @@ class Transformation:
             yaw = math.radians(yaw)
 
         R_yaw = np.array([
-            [ math.cos(yaw),  math.sin(yaw), 0],
-            [-math.sin(yaw),  math.cos(yaw), 0],
-            [0,               0,             1]
+            [math.cos(yaw), -math.sin(yaw), 0],
+            [math.sin(yaw),  math.cos(yaw), 0],
+            [0,              0,             1]
         ])
         return np.transpose(R_yaw) if invert else R_yaw
     
@@ -63,9 +63,9 @@ class Transformation:
             pitch = math.radians(pitch)
 
         R_pitch = np.array([
-            [ math.cos(pitch), 0, -math.sin(pitch)],
-            [0,                1,  0              ],
-            [ math.sin(pitch), 0,  math.cos(pitch)]
+            [ math.cos(pitch), 0, math.sin(pitch)],
+            [0,                1, 0              ],
+            [-math.sin(pitch), 0, math.cos(pitch)]
         ])
         return np.transpose(R_pitch) if invert else R_pitch
     
@@ -79,8 +79,8 @@ class Transformation:
 
         R_roll = np.array([
             [1, 0,               0              ],
-            [0, math.cos(roll),  math.sin(roll) ],
-            [0, -math.sin(roll), math.cos(roll) ]
+            [0, math.cos(roll), -math.sin(roll) ],
+            [0, math.sin(roll),  math.cos(roll) ]
         ])
         return np.transpose(R_roll) if invert else R_roll
     
@@ -145,7 +145,9 @@ class Location:
         self.state.nav.position = config.initial_position.copy()
         self.state.nav.velocity = np.zeros(3)
         self.state.nav.acceleration = np.zeros(3)
-        self.state.nav.orientation = config.initial_orientation.copy()
+        orientation = config.initial_orientation.copy()
+        orientation[0] = config.initial_heading
+        self.state.nav.orientation = orientation
         self.state.nav.angular_velocity = np.zeros(3)
         self.state.nav.angular_acceleration = np.zeros(3)
 
@@ -156,7 +158,11 @@ class Location:
         self.transformer = Transformation(mode=self.mode)
     
     async def update_orientation(self, dt: float = 0.1):
-        gyro = self.state.sensors.angular_velocity_raw
+        gyro_raw = self.state.sensors.angular_velocity_raw
+        gyro = await self.transformer.rotate_vector(
+            vector=gyro_raw,
+            orientation=self.config.sensors.imu.local_orientation
+        )
 
         self.state.nav.orientation += (
             0.5 * self.state.nav.angular_acceleration * dt ** 2
@@ -198,15 +204,15 @@ class Location:
         Extract [yaw, pitch, roll] from a ZYX rotation matrix built by Transformation.
         Handles the gimbal-lock singularity (|pitch| == 90°) by setting roll = 0.
         """
-        sin_pitch = np.clip(-R[0, 2], -1.0, 1.0)
+        sin_pitch = np.clip(-R[2, 0], -1.0, 1.0)
         pitch = math.asin(sin_pitch)
 
         if abs(abs(sin_pitch) - 1.0) < 1e-6:   # gimbal lock
-            yaw = math.atan2(-R[1, 0], R[1, 1])
+            yaw = math.atan2(-R[0, 1], R[1, 1])
             roll = 0.0
         else:
-            yaw = math.atan2(R[0, 1], R[0, 0])
-            roll = math.atan2(R[1, 2], R[2, 2])
+            yaw = math.atan2(R[1, 0], R[0, 0])
+            roll = math.atan2(R[2, 1], R[2, 2])
 
         if self.mode == "degrees":
             return np.array([math.degrees(yaw), math.degrees(pitch), math.degrees(roll)])
@@ -258,7 +264,7 @@ class Location:
             self.state.nav.position + np.matmul(R_robot, self.config.sensors.ir_sensor_right.local_position)
         )
 
-        # IMU magnetic sensor — position only, no orientation (gyro unaffected)
+        # IMU magnetic sensor — position only (orientation applied to gyro in update_orientation)
         self.state.sensors.mag_world_position = (
             self.state.nav.position + np.matmul(R_robot, self.config.sensors.imu.local_position)
         )
@@ -412,10 +418,10 @@ class Navigation:
                 self.motion.stop()
                 break
 
-            if degrees < 0:
-                self.motion.turn_left()
-            else:
+            if angle_error < 0:
                 self.motion.turn_right()
+            else:
+                self.motion.turn_left()
 
             await asyncio.sleep(0)
 
@@ -521,6 +527,9 @@ class Map:
         for side in ("left", "right", "center"):
             obstacle_pos = obstacles.get(side)
             if obstacle_pos is None:
+                continue
+            sensor = getattr(self.state.sensors, f"ultrasonic_{side}")
+            if sensor.distance < 0.0:
                 continue
             grid_x, grid_y = self._world_to_grid(obstacle_pos[0], obstacle_pos[1])
             if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:

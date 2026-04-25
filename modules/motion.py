@@ -28,11 +28,13 @@ class MotionController:
         self.speed = config.motor_speed
         self.motor_left = Motor(config.motors.port_left)
         self.motor_right = Motor(config.motors.port_right)
+        self._offset_left: int = 0
+        self._offset_right: int = 0
 
     def _sync_state(self):
         """Update state.motor_* with current hardware readings."""
-        self.state.motor_left.position = self.motor_left.get_position()
-        self.state.motor_right.position = self.motor_right.get_position()
+        self.state.motor_left.position = self.motor_left.get_position() - self._offset_left
+        self.state.motor_right.position = self.motor_right.get_position() - self._offset_right
         self.state.motor_left.is_moving = self.motor_left.get_speed() != 0
         self.state.motor_right.is_moving = self.motor_right.get_speed() != 0
 
@@ -92,6 +94,8 @@ class MotionController:
             update_interval (float): Update interval in seconds (default: 0.05)
         """
         update_interval = kwargs.get("update_interval", 0.05)
+        self._offset_left = self.motor_left.get_position()
+        self._offset_right = self.motor_right.get_position()
         while True:
             self._sync_state()
             await asyncio.sleep(update_interval)

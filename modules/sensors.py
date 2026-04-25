@@ -94,7 +94,7 @@ class SensorInput:
         """
         if self.imu is None:
             return (0.0, 0.0, 0.0)
-        
+
         self._gyro = np.array(self.imu.getGyro())
         self.state.sensors.angular_velocity_raw = self._gyro.copy()
         return tuple(self._gyro)

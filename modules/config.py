@@ -91,16 +91,18 @@ class IRSensorConfig:
 
 @dataclass
 class IMUSensorConfig:
-    """Static configuration for the IMU magnetic sensor mount.
-
-    Position-only transform (base frame → magnetic sensor).  Orientation is
-    intentionally omitted so gyroscope readings are never affected.
+    """Static configuration for the IMU mount relative to the robot frame.
 
     Attributes:
-        local_position: Magnetic sensor origin offset from robot base in robot
-            frame, meters [x, y, z].
+        local_position: IMU origin offset from robot base in robot frame,
+            meters [x, y, z].
+        local_orientation: Rotation from IMU frame to robot frame as
+            [yaw, pitch, roll] in degrees (ZYX Euler, extrinsic).
+            Gyroscope readings are remapped by this transform so the output
+            is expressed in the robot body frame.
     """
     local_position: np.ndarray = field(default_factory=_zero_vector)
+    local_orientation: np.ndarray = field(default_factory=_zero_vector)
 
 
 @dataclass
@@ -137,21 +139,21 @@ class SensorConfig:
     ultrasonic_left: UltrasonicSensorConfig = field(
         default_factory=lambda: UltrasonicSensorConfig(
             pin=22,
-            local_position=np.array([0.0, 0.0, 0.0]),
-            local_orientation=np.array([90.0, 0.0, 0.0]),
+            local_position=np.array([0.04, 0.115, 0.05]),
+            local_orientation=np.array([-90.0, 0.0, 0.0]),
         )
     )
     ultrasonic_right: UltrasonicSensorConfig = field(
         default_factory=lambda: UltrasonicSensorConfig(
             pin=26,
-            local_position=np.array([0.0, 0.0, 0.0]),
-            local_orientation=np.array([-90.0, 0.0, 0.0]),
+            local_position=np.array([0.04, -0.115, 0.05]),
+            local_orientation=np.array([90.0, 0.0, 0.0]),
         )
     )
     ultrasonic_center: UltrasonicSensorConfig = field(
         default_factory=lambda: UltrasonicSensorConfig(
             pin=24,
-            local_position=np.array([0.0, 0.0, 0.0]),
+            local_position=np.array([0.16, 0.0, 0.04]),
             local_orientation=np.array([0.0, 0.0, 0.0]),
         )
     )
@@ -210,6 +212,8 @@ class RobotConfig:
         motor_speed: Default motor drive speed (default: 50).
         angle_tolerance: Heading error in degrees considered aligned for navigation (default: 5.0).
         initial_position: Starting position [x, y, z] in meters.
+        initial_heading: Starting heading of the robot in degrees, measured CCW from +x.
+            Sets the yaw component of the initial orientation (default: 0.0).
         initial_orientation: Starting orientation [yaw, pitch, roll].
         motors: Motor port configuration.
         sensors: Sensor hardware and mount configuration.
@@ -220,6 +224,7 @@ class RobotConfig:
     motor_speed: int = 50
     angle_tolerance: float = 5.0
     initial_position: np.ndarray = field(default_factory=_zero_vector)
+    initial_heading: float = 0.0
     initial_orientation: np.ndarray = field(default_factory=_zero_vector)
     motors: MotorConfig = field(default_factory=MotorConfig)
     sensors: SensorConfig = field(default_factory=SensorConfig)
