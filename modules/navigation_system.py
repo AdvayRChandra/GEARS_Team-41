@@ -493,6 +493,7 @@ class Navigation:
                 self.map.update_obstacles(self._obstacles)
 
             self.map.update_path()
+            self.state.nav.obstacle_neighbors = self.map.get_obstacle_states()
             self._log.append({
                 "time": loop.time(),
                 "position": self.state.nav.position.copy(),
@@ -625,6 +626,41 @@ class Map:
                 if self.grid[grid_y, grid_x] not in _PROTECTED:
                     self.grid[grid_y, grid_x] = 3  # Magnetic source
     
+    def get_obstacle_states(self) -> list:
+        """Return the raw grid cell values for the 4 cells adjacent to the robot.
+
+        Order: [front, left, back, right] relative to the robot's current
+        discrete heading.  Uses the same grid-direction mapping as
+        update_obstacles:
+            front → ( dx, -dy)
+            left  → (-dy, -dx)
+            back  → (-dx,  dy)
+            right → ( dy,  dx)
+
+        Returns:
+            list[int] of length 4.  Each element is the raw grid cell value
+            (0=unknown/free, 1=path, 2=heat, 3=magnetic, 4=exit, 5=origin,
+            6=wall). -1 indicates the adjacent cell is out of bounds.
+        """
+        dx, dy = self.state.nav.discrete_orientation
+        robot_gx, robot_gy = self._world_to_grid(
+            self.state.nav.position[0], self.state.nav.position[1]
+        )
+        directions = [
+            ( dx, -dy),   # front
+            (-dy, -dx),   # left
+            (-dx,  dy),   # back
+            ( dy,  dx),   # right
+        ]
+        result = []
+        for gcol, grow in directions:
+            nx, ny = robot_gx + gcol, robot_gy + grow
+            if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
+                result.append(int(self.grid[ny, nx]))
+            else:
+                result.append(-1)
+        return result
+
     def save_map(self, notes: str = "") -> str:
         """Save the current grid map to maps/team{team}_map{map_id}.csv.
 

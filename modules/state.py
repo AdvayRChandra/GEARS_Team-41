@@ -91,6 +91,11 @@ class NavigationState:
     # Discrete 2D heading snapped to the nearest cardinal direction:
     # [1, 0]=+X  [-1, 0]=-X  [0, 1]=+Y  [0, -1]=-Y
     discrete_orientation: list = field(default_factory=lambda: [1, 0])
+    # Map-based neighbor cell values: [front, left, back, right] relative to the
+    # robot's current discrete heading. Each int is the raw grid cell value of
+    # the adjacent cell (0=unknown/free, 1=path, 2=heat, 3=magnetic, 4=exit,
+    # 5=origin, 6=wall). -1 indicates out-of-bounds.
+    obstacle_neighbors: list = field(default_factory=lambda: [0, 0, 0, 0])
 
 
 @dataclass
