@@ -18,7 +18,14 @@ Structure:
     ├── motors: MotorConfig
     │   ├── port_left: str              — BuildHAT port for left motor ("A"–"D")
     │   └── port_right: str             — BuildHAT port for right motor ("A"–"D")
-    └── sensors: SensorConfig
+    ├── sensors: SensorConfig
+    │   └── ...
+    └── map: MapConfig
+        ├── map_width: float            — mapped area width in meters
+        ├── map_height: float           — mapped area height in meters
+        ├── resolution: float           — meters per grid cell
+        ├── magnetic_threshold: float   — field strength to mark magnetic source
+        └── ir_threshold: int           — IR value (0–999) to mark heat source
         ├── enable_imu: bool
         ├── enable_ultrasonic: bool
         ├── enable_button: bool
@@ -32,6 +39,7 @@ Structure:
 
 from __future__ import annotations
 from dataclasses import dataclass, field
+from typing import Optional, Tuple
 import numpy as np
 
 
@@ -132,8 +140,31 @@ class SensorConfig:
 
 
 @dataclass
+class MapConfig:
+    """Static configuration for the 2D occupancy grid map.
+
+    Attributes:
+        map_width: Physical width of the mapped area in meters (default: 10.0).
+        map_height: Physical height of the mapped area in meters (default: 10.0).
+        resolution: Meters per grid cell (default: 0.01 → 1 cm/cell).
+        magnetic_threshold: Magnetic field reading above which a cell is marked
+            as a magnetic source (default: 1000.0).
+        ir_threshold: IR sensor value (0–999) above which the sensor position is
+            marked as a heat source (default: 500).
+        origin: Grid-index (col, row) that corresponds to world position (0, 0).
+            Defaults to None, which places the origin at the grid center.
+    """
+    map_width: float = 10.0
+    map_height: float = 10.0
+    resolution: float = 0.01
+    magnetic_threshold: float = 1000.0
+    ir_threshold: int = 500
+    origin: Optional[Tuple[int, int]] = None
+
+
+@dataclass
 class RobotConfig:
-    """Top-level static configuration for MACRO.
+    """Top-level static configuration for GEARS robot.
 
     Attributes:
         mode: Angle unit mode — "degrees" (default) or "radians".
@@ -142,7 +173,9 @@ class RobotConfig:
         angle_tolerance: Heading error in degrees considered aligned for navigation (default: 5.0).
         initial_position: Starting position [x, y, z] in meters.
         initial_orientation: Starting orientation [yaw, pitch, roll].
+        motors: Motor port configuration.
         sensors: Sensor hardware and mount configuration.
+        map: Occupancy grid map configuration.
     """
     mode: str = "degrees"
     wheel_diameter: float = 0.056
@@ -152,3 +185,4 @@ class RobotConfig:
     initial_orientation: np.ndarray = field(default_factory=_zero_vector)
     motors: MotorConfig = field(default_factory=MotorConfig)
     sensors: SensorConfig = field(default_factory=SensorConfig)
+    map: MapConfig = field(default_factory=MapConfig)

@@ -313,6 +313,7 @@ class Navigation:
         self._log = []
         self._obstacles = {"left": None, "right": None, "center": None}
         self.transformer = Transformation(mode=config.mode)
+        self.map = Map(state=state, config=config)
 
     async def get_obstacle_positions(self) -> dict:
         """
@@ -426,12 +427,85 @@ class Navigation:
         while True:
             await asyncio.sleep(update_interval)
             self._obstacles = await self.get_obstacle_positions()
+            self.map.update_obstacles(self._obstacles)
+            self.map.update_path()
             self._log.append({
                 "time": loop.time(),
                 "position": self.state.nav.position.copy(),
                 "orientation": self.state.nav.orientation.copy(),
             })
 
+class Map:
+    def __init__(self, state: State, config: RobotConfig):
+        map_cfg = config.map
+        self.resolution: float = map_cfg.resolution
+        self.magnetic_threshold: float = map_cfg.magnetic_threshold
+        self.ir_threshold: int = map_cfg.ir_threshold
+        self.state: State = state
+        self.grid_width = int(map_cfg.map_width / self.resolution)
+        self.grid_height = int(map_cfg.map_height / self.resolution)
+        self.origin = map_cfg.origin if map_cfg.origin is not None else (self.grid_width // 2, self.grid_height // 2)
+
+        """
+        2D occupancy grid representing the environment. Each cell can be:
+        - 0: Unknown/Free space (not part of path)
+        - 1: Path travelled (free space)
+        - 2: Heat source (obstacle)
+        - 3: Magnetic source (obstacle)
+        - 4: Exit point (goal)
+        - 5: Origin (starting position)
+        - 6: Wall (detected by sensors but not yet classified as obstacle)
+        """
+        self.grid = np.zeros((self.grid_height, self.grid_width), dtype=np.uint8)
+        self.grid[self.origin[1], self.origin[0]] = 5  # Mark the origin (starting position)
+
+    def _world_to_grid(self, world_x: float, world_y: float):
+        """Convert world-frame coordinates (meters) to grid indices, offset by origin."""
+        grid_x = self.origin[0] + int(world_x / self.resolution)
+        grid_y = self.origin[1] + int(world_y / self.resolution)
+        return grid_x, grid_y
+
+    def update_path(self):
+        """Mark the robot's current world position as travelled path (1)."""
+        pos = self.state.nav.position
+        grid_x, grid_y = self._world_to_grid(pos[0], pos[1])
+        if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
+            if self.grid[grid_y, grid_x] == 0:  # Only overwrite unknown cells
+                self.grid[grid_y, grid_x] = 1
+
+    def update_obstacles(self, obstacles: dict):
+        """
+        Update the grid with pre-computed world-frame obstacle positions.
+
+        Args:
+            obstacles: Dict with keys "left", "right", "center" mapping to
+                np.ndarray world positions (or None if no detection).
+        """
+        # Ultrasonic obstacles — positions already projected into world frame
+        for side in ("left", "right", "center"):
+            obstacle_pos = obstacles.get(side)
+            if obstacle_pos is None:
+                continue
+            grid_x, grid_y = self._world_to_grid(obstacle_pos[0], obstacle_pos[1])
+            if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
+                self.grid[grid_y, grid_x] = 6  # Wall
+
+        # IR sensor — mark heat source at sensor world position
+        ir_value1 = self.state.sensors.ir_sensor.value1
+        ir_value2 = self.state.sensors.ir_sensor.value2
+        if ir_value1 >= self.ir_threshold or ir_value2 >= self.ir_threshold:
+            ir_pos = self.state.sensors.ir_sensor.world_position
+            grid_x, grid_y = self._world_to_grid(ir_pos[0], ir_pos[1])
+            if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
+                self.grid[grid_y, grid_x] = 2  # Heat source
+
+        # Magnetic source — mark at robot's current position
+        magnetic_field = self.state.sensors.magnetic_field
+        if magnetic_field >= self.magnetic_threshold:
+            mag_pos = self.state.nav.position
+            grid_x, grid_y = self._world_to_grid(mag_pos[0], mag_pos[1])
+            if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
+                self.grid[grid_y, grid_x] = 3  # Magnetic source
 
 if __name__ == "__main__":
     # Run from the project root as:  python -m modules.navigation_system
