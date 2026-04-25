@@ -191,7 +191,7 @@ class Location:
     async def update_position(self, dt: float = 0.1):
         delta_left = self.state.motor_left.position - self._prev_motor_left
         delta_right = self.state.motor_right.position - self._prev_motor_right
-        delta_degrees = (delta_left + delta_right) / 2
+        delta_degrees = (delta_left - delta_right) / 2
         distance = (delta_degrees / 360) * math.pi * self.wheel_diameter
 
         self._prev_motor_left = self.state.motor_left.position
@@ -499,7 +499,7 @@ class Navigation:
            -1  → turn left   (-90°)
             2  → turn around (180°)
         """
-        _DIRECTION_DEGREES = {0: 0, 1: 90, -1: -90, 2: 180}
+        _DIRECTION_DEGREES = {0: 0, 1: -90, -1: 90, 2: 180}
         _DIRECTION_LABELS  = {0: "forward", 1: "right", -1: "left", 2: "around"}
         direction = self.determine_turn()
         degrees = _DIRECTION_DEGREES[direction]
@@ -597,8 +597,8 @@ class Map:
         Y maps to row: increasing world y → decreasing row (bottom to top),
         because row 0 is the top of the array.
         """
-        grid_x = int((world_x - self.x_min) / self.resolution)
-        grid_y = int((self.y_max - world_y) / self.resolution)
+        grid_x = int((world_x - self.x_min) / self.resolution + 1e-9)
+        grid_y = int((self.y_max - world_y) / self.resolution + 1e-9)
         return grid_x, grid_y
 
     def update_path(self):

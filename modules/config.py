@@ -161,13 +161,13 @@ class SensorConfig:
     ir_sensor_left: IRSensorConfig = field(
         default_factory=lambda: IRSensorConfig(
             pin=2,
-            local_position=np.array([0.0, 0.0, 0.0]),
+            local_position=np.array([0.15, 0.045, 0.0]),
         )
     )
     ir_sensor_right: IRSensorConfig = field(
         default_factory=lambda: IRSensorConfig(
             pin=3,
-            local_position=np.array([0.0, 0.0, 0.0]),
+            local_position=np.array([0.15, -0.045, 0.0]),
         )
     )
 

@@ -61,12 +61,12 @@ class MotionController:
         self._drive(-s, s)
 
     def turn_right(self, speed: int = None):
-        """Pivot left: left motor backward, right motor forward."""
+        """Pivot right: left motor backward, right motor forward."""
         s = speed if speed is not None else self.speed
         self._drive(-s, -s)
 
     def turn_left(self, speed: int = None):
-        """Pivot right: left motor forward, right motor backward."""
+        """Pivot left: left motor forward, right motor backward."""
         s = speed if speed is not None else self.speed
         self._drive(s, s)
 
