@@ -391,36 +391,45 @@ class Navigation:
 
         return result
 
-    async def go_to(self, destination):
+    async def go_to(self, destination_cell):
         """
-        Navigate to a 2D destination by first rotating to face it, then driving forward.
+        Navigate to a destination grid cell using automatic_turn for obstacle-aware routing.
+
+        Marks the destination cell as value 4 (exit) on the map, then starts an
+        asynchronous navigation loop that repeatedly calls automatic_turn().  The
+        loop is cancelled and the robot is stopped once the robot's current grid
+        cell matches the destination cell.
 
         Args:
-            destination: Target position [x, y] or [x, y, z]. Only x/y are used.
+            destination_cell: Target grid cell as (col, row) indices.
         """
-        dest_x = float(destination[0])
-        dest_y = float(destination[1])
+        dest_col, dest_row = int(destination_cell[0]), int(destination_cell[1])
 
-        # Phase 1: Rotate to face the destination.
-        target_yaw = math.degrees(math.atan2(dest_y - self.state.nav.position[1], dest_x - self.state.nav.position[0]))
-        angle_error = (target_yaw - self.state.nav.orientation[0] + 180) % 360 - 180
-        await self.turn_degrees(angle_error)
+        # Mark the destination on the map
+        if 0 <= dest_col < self.map.grid_width and 0 <= dest_row < self.map.grid_height:
+            self.map.grid[dest_row, dest_col] = 4
 
-        # Snapshot position after the turn to measure travel distance.
-        start = np.array([self.state.nav.position[0], self.state.nav.position[1]])
-        total_distance = math.sqrt((dest_x - start[0]) ** 2 + (dest_y - start[1]) ** 2)
+        async def _navigate_loop():
+            while True:
+                await self.automatic_turn()
+                await asyncio.sleep(0)
 
-        # Phase 2: Drive forward until the required distance is covered.
-        while True:
-            cur = np.array([self.state.nav.position[0], self.state.nav.position[1]])
-            traveled = float(np.linalg.norm(cur - start))
+        nav_task = asyncio.ensure_future(_navigate_loop())
 
-            if traveled >= total_distance:
-                self.motion.stop()
-                break
-
-            self.motion.forward()
-            await asyncio.sleep(0)
+        try:
+            while True:
+                cur_col, cur_row = self.map._world_to_grid(
+                    self.state.nav.position[0], self.state.nav.position[1]
+                )
+                if cur_col == dest_col and cur_row == dest_row:
+                    nav_task.cancel()
+                    self.motion.stop()
+                    break
+                await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            nav_task.cancel()
+            self.motion.stop()
+            raise
 
     async def turn_degrees(self, degrees: float):
         """
@@ -448,6 +457,57 @@ class Navigation:
                 self.motion.turn_left()
 
             await asyncio.sleep(0)
+
+    def determine_turn(self) -> int:
+        """
+        Determine the turn required based on current obstacle_neighbors and map cell values.
+
+        The preferred direction is chosen from state.nav.obstacle_neighbors using
+        map cell values:
+            Priority 1 — cells with value 0 (unknown/free space)
+            Priority 2 — cells with value 1 (previously travelled path)
+            Direction preference within each priority tier: front > right > left > back
+
+        Returns:
+            int: Direction code.
+                  0 = forward,  1 = right,  -1 = left,  2 = back.
+                  Returns 0 if no preferred direction can be determined.
+        """
+        front, left, back, right = self.state.nav.obstacle_neighbors  # [0]=front [1]=left [2]=back [3]=right
+
+        # Map-value priority navigation: front > right > left > back
+        dir_preference = [
+            (front,  0),
+            (right,  1),
+            (left,  -1),
+            (back,   2),
+        ]
+        for target_val in (0, 1):
+            for cell_val, direction in dir_preference:
+                if cell_val == target_val:
+                    return direction
+
+        return 0
+
+    async def automatic_turn(self):
+        """
+        Determine the required turn and execute it, or drive forward if none needed.
+
+        Calls determine_turn() to get a direction code and maps it to degrees:
+            0  → forward (no turn)
+            1  → turn right  (+90°)
+           -1  → turn left   (-90°)
+            2  → turn around (180°)
+        """
+        _DIRECTION_DEGREES = {0: 0, 1: 90, -1: -90, 2: 180}
+        _DIRECTION_LABELS  = {0: "forward", 1: "right", -1: "left", 2: "around"}
+        direction = self.determine_turn()
+        degrees = _DIRECTION_DEGREES[direction]
+        if degrees != 0:
+            print(f"[Navigation] Turning {_DIRECTION_LABELS[direction]} ({degrees:+d}°)")
+            await self.turn_degrees(degrees)
+        else:
+            self.motion.forward()
 
     async def setup(self):
         """
@@ -704,7 +764,8 @@ class Map:
             writer.writerow([f"Unit: {unit}"])
             writer.writerow([f"Origin: {origin_str}"])
             writer.writerow([f"Notes: {notes}"])
-            for row in self.grid:
+            export_grid = np.where(self.grid == 6, 0, self.grid)
+            for row in export_grid:
                 writer.writerow(row.tolist())
 
         return filename
@@ -717,29 +778,21 @@ if __name__ == "__main__":
     from .config import RobotConfig
 
     async def _display_loop(state: State, map: 'Map', interval: float = 0.5):
+        _CELL_NAMES = {0: "free", 1: "path", 2: "heat", 3: "mag", 4: "exit", 5: "origin", 6: "wall", -1: "OOB"}
         while True:
             await asyncio.sleep(interval)
-            s = state.sensors
             n = state.nav
             grid_x, grid_y = map._world_to_grid(n.position[0], n.position[1])
+            front, left, back, right = n.obstacle_neighbors
             print(
-                "\n--- State ---\n"
-                f"  position    : {n.position}\n"
-                f"  grid coords : ({grid_x}, {grid_y})\n"
-                f"  velocity    : {n.velocity}\n"
-                f"  orientation : {n.orientation}\n"
-                f"  gyro (raw)  : {s.angular_velocity_raw}\n"
-                f"  dist left   : {s.ultrasonic_left.distance:.1f} cm\n"
-                f"  dist right  : {s.ultrasonic_right.distance:.1f} cm\n"
-                f"  dist center : {s.ultrasonic_center.distance:.1f} cm\n"
-                f"  IR left     : {'N/A (not detected)' if s.ir_sensor_left.value == -1 else s.ir_sensor_left.value}\n"
-                f"  IR right    : {'N/A (not detected)' if s.ir_sensor_right.value == -1 else s.ir_sensor_right.value}\n"
-                f"  magnetic    : {s.magnetic_field:.2f}\n"
-                f"  motor left  : pos={state.motor_left.position:.1f}  moving={state.motor_left.is_moving}\n"
-                f"  motor right : pos={state.motor_right.position:.1f}  moving={state.motor_right.is_moving}"
+                f"[Nav] cell=({grid_x},{grid_y})  "
+                f"front={_CELL_NAMES.get(front, front)}  "
+                f"right={_CELL_NAMES.get(right, right)}  "
+                f"left={_CELL_NAMES.get(left, left)}  "
+                f"back={_CELL_NAMES.get(back, back)}"
             )
 
-    async def main():
+    async def main(dest_cell):
         global navigation
         state = State()
         config = RobotConfig()
@@ -754,7 +807,7 @@ if __name__ == "__main__":
         await motion.setup()
         await navigation.setup()
 
-        tasks = [
+        background_tasks = [
             asyncio.create_task(sensors.run_sensor_update()),
             asyncio.create_task(location.run_location_update()),
             asyncio.create_task(motion.run_motor_update()),
@@ -762,29 +815,25 @@ if __name__ == "__main__":
             asyncio.create_task(_display_loop(state, navigation.map)),
         ]
 
-        print("Running — press Ctrl+C to stop.\n")
+        print(f"Navigating to cell {dest_cell} — press Ctrl+C to stop.\n")
         try:
-            await asyncio.gather(*tasks)
+            await navigation.go_to(dest_cell)
+            print("\nDestination reached.")
         except (KeyboardInterrupt, asyncio.CancelledError):
-            pass
+            motion.stop()
         finally:
-            for task in tasks:
+            for task in background_tasks:
                 task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            print("\nShutdown complete.")
+            await asyncio.gather(*background_tasks, return_exceptions=True)
+            path = navigation.map.save_map(notes=map_notes)
+            print(f"Map saved to {path}")
+            print("Shutdown complete.")
 
-    save_map_flag = input("Save map after run? (y/n): ").strip().lower() == "y"
-    map_notes = ""
-    if save_map_flag:
-        map_notes = input("Enter notes for the map: ").strip()
+    dest_col = int(input("Destination cell X (col): ").strip())
+    dest_row = int(input("Destination cell Y (row): ").strip())
+    map_notes = input("Enter notes for the map (leave blank for none): ").strip()
 
     try:
-        asyncio.run(main())
+        asyncio.run(main((dest_col, dest_row)))
     except KeyboardInterrupt:
         pass
-
-    if save_map_flag:
-        # navigation is defined inside main() so we reach the map via the module-level
-        # State; re-instantiate Map with the same config just to write the grid.
-        path = navigation.map.save_map(notes=map_notes)
-        print(f"Map saved to {path}")
