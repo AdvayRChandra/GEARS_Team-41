@@ -11,7 +11,8 @@ Structure:
     │   ├── ultrasonic_left: UltrasonicSensorState
     │   ├── ultrasonic_right: UltrasonicSensorState
     │   ├── ultrasonic_center: UltrasonicSensorState
-    │   └── ir_sensor: IRSensorState
+    │   ├── ir_sensor: IRSensorState
+    │   └── mag_world_position: np.ndarray
     ├── nav: NavigationState        — computed pose, velocity, and orientation
     ├── motor_left: MotorState      — left motor (port A) position and motion status
     └── motor_right: MotorState     — right motor (port B) position and motion status
@@ -65,6 +66,7 @@ class SensorState:
     # IMU (gyroscope and magnetometer)
     angular_velocity_raw: np.ndarray = field(default_factory=_zero_vector)
     magnetic_field: float = 0.0
+    mag_world_position: np.ndarray = field(default_factory=_zero_vector)
 
     # Ultrasonic sensors
     ultrasonic_left: UltrasonicSensorState = field(default_factory=UltrasonicSensorState)

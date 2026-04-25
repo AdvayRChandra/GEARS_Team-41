@@ -228,6 +228,10 @@ class Location:
         For the IR sensor (no orientation):
           1. Position transform only:
              world_pos = robot_position + R_robot @ local_position
+
+        For the IMU magnetic sensor (no orientation):
+          1. Position transform only:
+             world_pos = robot_position + R_robot @ local_position
         """
         R_robot = await self.transformer.get_rotation(orientation=self.state.nav.orientation)
 
@@ -250,6 +254,11 @@ class Location:
         ir_state = self.state.sensors.ir_sensor
         ir_cfg = self.config.sensors.ir_sensor
         ir_state.world_position = self.state.nav.position + np.matmul(R_robot, ir_cfg.local_position)
+
+        # IMU magnetic sensor — position only, no orientation (gyro unaffected)
+        self.state.sensors.mag_world_position = (
+            self.state.nav.position + np.matmul(R_robot, self.config.sensors.imu.local_position)
+        )
     
     async def update(self, dt: float = 0.1):
         """Update both orientation and position."""
@@ -508,10 +517,10 @@ class Map:
             if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
                 self.grid[grid_y, grid_x] = 2  # Heat source
 
-        # Magnetic source — mark at robot's current position
+        # Magnetic source — mark at magnetometer world position
         magnetic_field = self.state.sensors.magnetic_field
         if magnetic_field >= self.magnetic_threshold:
-            mag_pos = self.state.nav.position
+            mag_pos = self.state.sensors.mag_world_position
             grid_x, grid_y = self._world_to_grid(mag_pos[0], mag_pos[1])
             if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
                 self.grid[grid_y, grid_x] = 3  # Magnetic source

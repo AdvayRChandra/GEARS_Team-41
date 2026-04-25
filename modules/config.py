@@ -86,6 +86,20 @@ class IRSensorConfig:
 
 
 @dataclass
+class IMUSensorConfig:
+    """Static configuration for the IMU magnetic sensor mount.
+
+    Position-only transform (base frame → magnetic sensor).  Orientation is
+    intentionally omitted so gyroscope readings are never affected.
+
+    Attributes:
+        local_position: Magnetic sensor origin offset from robot base in robot
+            frame, meters [x, y, z].
+    """
+    local_position: np.ndarray = field(default_factory=_zero_vector)
+
+
+@dataclass
 class SensorConfig:
     """Static configuration for all sensors.
 
@@ -110,6 +124,11 @@ class SensorConfig:
     # local_position: [x, y, z] offset in meters.
     # local_orientation: [yaw, pitch, roll] in degrees.
     # Update these to match the physical sensor placement on the robot.
+    imu: IMUSensorConfig = field(
+        default_factory=lambda: IMUSensorConfig(
+            local_position=np.array([0.0, 0.0, 0.0]),
+        )
+    )
     ultrasonic_left: UltrasonicSensorConfig = field(
         default_factory=lambda: UltrasonicSensorConfig(
             pin=22,
