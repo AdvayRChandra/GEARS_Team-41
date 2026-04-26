@@ -425,6 +425,45 @@ class Navigation:
                     nav_task.cancel()
                     self.motion.stop()
                     break
+                front, left, back, right = self.state.nav.obstacle_neighbors
+                if front == 0 and right == 0 and left == 0:
+                    nav_task.cancel()
+                    self.motion.stop()
+                    if 0 <= cur_col < self.map.grid_width and 0 <= cur_row < self.map.grid_height:
+                        self.map.grid[cur_row, cur_col] = 4
+                    break
+                await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            nav_task.cancel()
+            self.motion.stop()
+            raise
+
+    async def explore(self):
+        """
+        Navigate until an exit is found: a cell where front, right, and left
+        are all free (grid value 0 — unknown/unvisited space).  When the
+        condition is met the robot stops and the current cell is marked as
+        exit (value 4) on the map.
+        """
+        async def _navigate_loop():
+            while True:
+                await self.automatic_turn()
+                await asyncio.sleep(0)
+
+        nav_task = asyncio.ensure_future(_navigate_loop())
+
+        try:
+            while True:
+                front, left, back, right = self.state.nav.obstacle_neighbors
+                if front == 0 and right == 0 and left == 0:
+                    nav_task.cancel()
+                    self.motion.stop()
+                    cur_col, cur_row = self.map._world_to_grid(
+                        self.state.nav.position[0], self.state.nav.position[1]
+                    )
+                    if 0 <= cur_col < self.map.grid_width and 0 <= cur_row < self.map.grid_height:
+                        self.map.grid[cur_row, cur_col] = 4
+                    break
                 await asyncio.sleep(0)
         except asyncio.CancelledError:
             nav_task.cancel()
@@ -444,6 +483,7 @@ class Navigation:
         target_yaw = self.state.nav.orientation[0] + degrees
 
         while True:
+            await asyncio.sleep(0.05)  # Wait for a fresh orientation reading each iteration
             current_yaw = self.state.nav.orientation[0]
             angle_error = (target_yaw - current_yaw + 180) % 360 - 180
 
@@ -455,8 +495,6 @@ class Navigation:
                 self.motion.turn_right()
             else:
                 self.motion.turn_left()
-
-            await asyncio.sleep(0)
 
     def determine_turn(self) -> int:
         """
@@ -783,16 +821,18 @@ if __name__ == "__main__":
             await asyncio.sleep(interval)
             n = state.nav
             grid_x, grid_y = map._world_to_grid(n.position[0], n.position[1])
+            rel_x = grid_x - map.origin[0]
+            rel_y = grid_y - map.origin[1]
             front, left, back, right = n.obstacle_neighbors
             print(
-                f"[Nav] cell=({grid_x},{grid_y})  "
+                f"[Nav] cell=({rel_x},{rel_y})  "
                 f"front={_CELL_NAMES.get(front, front)}  "
                 f"right={_CELL_NAMES.get(right, right)}  "
                 f"left={_CELL_NAMES.get(left, left)}  "
                 f"back={_CELL_NAMES.get(back, back)}"
             )
 
-    async def main(dest_cell):
+    async def main():
         global navigation
         state = State()
         config = RobotConfig()
@@ -815,10 +855,11 @@ if __name__ == "__main__":
             asyncio.create_task(_display_loop(state, navigation.map)),
         ]
 
-        print(f"Navigating to cell {dest_cell} — press Ctrl+C to stop.\n")
+        # dest_cell is relative to the map origin; convert to absolute grid coords
+        print("Exploring — will stop automatically when an exit is found. Press Ctrl+C to abort.\n")
         try:
-            await navigation.go_to(dest_cell)
-            print("\nDestination reached.")
+            await navigation.explore()
+            print("\nExit found. Robot stopped.")
         except (KeyboardInterrupt, asyncio.CancelledError):
             motion.stop()
         finally:
@@ -829,11 +870,9 @@ if __name__ == "__main__":
             print(f"Map saved to {path}")
             print("Shutdown complete.")
 
-    dest_col = int(input("Destination cell X (col): ").strip())
-    dest_row = int(input("Destination cell Y (row): ").strip())
     map_notes = input("Enter notes for the map (leave blank for none): ").strip()
 
     try:
-        asyncio.run(main((dest_col, dest_row)))
+        asyncio.run(main())
     except KeyboardInterrupt:
         pass
