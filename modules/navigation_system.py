@@ -115,6 +115,35 @@ class Transformation:
         return vector + translation
 
 
+class Transformation2D:
+    """
+    2D transformation utilities — yaw (Z-axis) rotation only.
+
+    All operations are in the XY plane.  No pitch or roll.
+
+    Args:
+        mode (str): Angle unit mode - "degrees" (default) or "radians"
+    """
+
+    def __init__(self, mode: str = "degrees"):
+        self.mode = mode
+
+    def get_rotation_yaw(self, yaw: float, invert: bool = False) -> np.ndarray:
+        """Return the 2x2 rotation matrix for the given yaw angle."""
+        if self.mode == "degrees":
+            yaw = math.radians(yaw)
+        R = np.array([
+            [math.cos(yaw), -math.sin(yaw)],
+            [math.sin(yaw),  math.cos(yaw)],
+        ])
+        return np.transpose(R) if invert else R
+
+    def rotate_vector(self, vector, yaw: float, invert: bool = False) -> np.ndarray:
+        """Rotate a 2D (or 3D — only XY used) vector by yaw."""
+        R = self.get_rotation_yaw(yaw, invert)
+        return np.matmul(R, np.asarray(vector)[:2])
+
+
 class Location:
     """
     3D position tracking using motor odometry and gyroscope data.
@@ -308,6 +337,140 @@ class Location:
         Reads sensor data written by SensorInput into state.sensors and writes
         the computed pose into state.nav.  Run concurrently with
         SensorInput.run_sensor_update() so state.sensors is always fresh.
+
+        Args:
+            update_interval (float): Update interval in seconds (default: 0.05)
+        """
+        update_interval = kwargs.get("update_interval", 0.05)
+        loop = asyncio.get_running_loop()
+        last_time = loop.time()
+
+        while True:
+            await asyncio.sleep(update_interval)
+            now = loop.time()
+            dt = now - last_time
+            last_time = now
+            await self.update(dt=dt)
+
+
+class Location2D:
+    """
+    2D position tracking using motor odometry and Z-axis gyroscope only.
+
+    Simpler and more stable than Location.  Ignores pitch/roll and only
+    integrates the Z-axis gyro for heading.  Applies bias calibration (via
+    setup()) and a dead-zone threshold to suppress constant gyro drift.
+
+    Args:
+        state (State): Centralized state object for sensor and navigation data.
+        config (RobotConfig): Static robot configuration (wheel diameter, mode,
+            initial pose).
+
+    Attributes:
+        state.nav.position:    Current position [x, y, 0] in global frame.
+        state.nav.velocity:    Current velocity [vx, vy, 0] in global frame.
+        state.nav.orientation: Current orientation [yaw, 0, 0].
+    """
+
+    _GYRO_DEADZONE = 0.1   # units match config.mode (deg/s or rad/s)
+    _BIAS_SAMPLES  = 50
+
+    _DISCRETE_DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]]
+
+    def __init__(self, state: State, config: RobotConfig):
+        self.state = state
+        self.config = config
+        self.wheel_diameter = config.wheel_diameter
+        self.mode = config.mode
+
+        # Seed nav state from config
+        self.state.nav.position = np.array([*config.initial_position[:2], 0.0])
+        self.state.nav.velocity = np.zeros(3)
+        self.state.nav.acceleration = np.zeros(3)
+        self.state.nav.orientation = np.array([config.initial_heading, 0.0, 0.0])
+        self.state.nav.angular_velocity = np.zeros(3)
+        self.state.nav.angular_acceleration = np.zeros(3)
+
+        self._prev_motor_left  = state.motor_left.position
+        self._prev_motor_right = state.motor_right.position
+
+        self._gyro_bias_z = 0.0  # calibrated in setup()
+
+        self.transformer = Transformation2D(mode=self.mode)
+
+    def _compute_discrete_orientation(self, yaw) -> list:
+        """Snap yaw to nearest cardinal direction."""
+        yaw_deg = yaw if self.mode == "degrees" else math.degrees(yaw)
+        idx = round((yaw_deg % 360) / 90) % 4
+        return self._DISCRETE_DIRS[idx]
+
+    async def setup(self):
+        """
+        Calibrate gyro Z-axis bias and snapshot motor positions.
+
+        Takes _BIAS_SAMPLES readings from the Z-axis gyro while the robot is
+        stationary to compute the idle offset.  This offset is subtracted on
+        every update_orientation() call to suppress constant heading drift.
+        Robot must be stationary when this is called.
+        """
+        self._prev_motor_left  = self.state.motor_left.position
+        self._prev_motor_right = self.state.motor_right.position
+
+        samples = []
+        for _ in range(self._BIAS_SAMPLES):
+            samples.append(self.state.sensors.angular_velocity_raw[2])
+            await asyncio.sleep(0.01)
+        self._gyro_bias_z = sum(samples) / len(samples)
+
+    async def update_orientation(self, dt: float = 0.1):
+        gz = self.state.sensors.angular_velocity_raw[2] - self._gyro_bias_z
+
+        # Dead-zone: suppress noise below threshold to avoid integrating idle drift
+        if abs(gz) < self._GYRO_DEADZONE:
+            gz = 0.0
+
+        yaw = self.state.nav.orientation[0] + gz * dt
+        self.state.nav.orientation = np.array([yaw, 0.0, 0.0])
+        self.state.nav.angular_velocity = np.array([0.0, 0.0, gz])
+
+        self.state.nav.discrete_orientation = self._compute_discrete_orientation(yaw)
+        return True
+
+    async def update_position(self, dt: float = 0.1):
+        delta_left  = self.state.motor_left.position  - self._prev_motor_left
+        delta_right = self.state.motor_right.position - self._prev_motor_right
+        delta_degrees = (delta_left - delta_right) / 2
+        distance = (delta_degrees / 360) * math.pi * self.wheel_diameter
+
+        self._prev_motor_left  = self.state.motor_left.position
+        self._prev_motor_right = self.state.motor_right.position
+
+        yaw = self.state.nav.orientation[0]
+        speed = distance / dt if dt > 0 else 0.0
+
+        v2 = self.transformer.rotate_vector([speed, 0.0], yaw)
+        velocity = np.array([v2[0], v2[1], 0.0])
+
+        self.state.nav.position += (
+            0.5 * self.state.nav.acceleration * dt ** 2
+            + self.state.nav.velocity * dt
+        )
+        self.state.nav.acceleration = (velocity - self.state.nav.velocity) / dt
+        self.state.nav.velocity = velocity
+
+        return True
+
+    async def update(self, dt: float = 0.1):
+        """Update orientation then position."""
+        await self.update_orientation(dt=dt)
+        await self.update_position(dt=dt)
+        return True
+
+    async def run_location_update(self, **kwargs):
+        """
+        Continuously update position and orientation at a fixed interval.
+
+        Drop-in replacement for Location.run_location_update().
 
         Args:
             update_interval (float): Update interval in seconds (default: 0.05)
@@ -809,6 +972,105 @@ class Map:
         return filename
 
 
+class Map2D(Map):
+    """
+    2D occupancy grid — same as Map, but computes IR/magnetic world positions
+    internally using Transformation2D instead of relying on the 3D sensor
+    transforms in Location._compute_sensor_poses.
+
+    Drop-in replacement for Map when using Location2D.
+    """
+
+    def __init__(self, state: State, config: RobotConfig):
+        super().__init__(state, config)
+        self._transformer2d = Transformation2D(mode=config.mode)
+
+    def update_obstacles(self, obstacles: dict):
+        """
+        Same as Map.update_obstacles, except IR and magnetic sensor world
+        positions are computed inline from the robot's current 2D pose and
+        the sensor's local_position offset.
+        """
+        _PROTECTED = {1, 4, 5}
+
+        # Ultrasonic obstacles — grid arithmetic (identical to Map)
+        dx, dy = self.state.nav.discrete_orientation
+        robot_gx, robot_gy = self._world_to_grid(
+            self.state.nav.position[0], self.state.nav.position[1]
+        )
+        side_grid_dirs = {
+            "center": ( dx, -dy),
+            "left":   (-dy, -dx),
+            "right":  ( dy,  dx),
+        }
+        for side in ("left", "right", "center"):
+            if obstacles.get(side) is None:
+                continue
+            sensor = getattr(self.state.sensors, f"ultrasonic_{side}")
+            if sensor.distance < 0.0:
+                continue
+            cells = round((sensor.distance / 100.0) / self.resolution)
+            gcol, grow = side_grid_dirs[side]
+            grid_x = robot_gx + gcol * cells
+            grid_y = robot_gy + grow * cells
+            if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
+                if self.grid[grid_y, grid_x] == 0:
+                    self.grid[grid_y, grid_x] = 6
+
+        # IR sensors — compute 2D world position from robot pose + local offset
+        yaw = self.state.nav.orientation[0]
+        robot_pos = self.state.nav.position[:2]
+
+        for ir_attr, cfg_attr in (
+            ("ir_sensor_left",  "ir_sensor_left"),
+            ("ir_sensor_right", "ir_sensor_right"),
+        ):
+            ir = getattr(self.state.sensors, ir_attr)
+            if ir.value >= self.ir_threshold:
+                local_pos = getattr(self.config.sensors, cfg_attr).local_position[:2]
+                world_pos = robot_pos + self._transformer2d.rotate_vector(local_pos, yaw)
+                grid_x, grid_y = self._world_to_grid(world_pos[0], world_pos[1])
+                if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
+                    if self.grid[grid_y, grid_x] not in _PROTECTED:
+                        self.grid[grid_y, grid_x] = 2
+
+        # Magnetic sensor — compute 2D world position from robot pose + local offset
+        if self.state.sensors.magnetic_field >= self.magnetic_threshold:
+            local_pos = self.config.sensors.imu.local_position[:2]
+            world_pos = robot_pos + self._transformer2d.rotate_vector(local_pos, yaw)
+            grid_x, grid_y = self._world_to_grid(world_pos[0], world_pos[1])
+            if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
+                if self.grid[grid_y, grid_x] not in _PROTECTED:
+                    self.grid[grid_y, grid_x] = 3
+
+
+class Navigation2D(Navigation):
+    """
+    2D navigation — same as Navigation but backed by Map2D and does not rely
+    on the 3D sensor world positions computed by Location._compute_sensor_poses.
+
+    Drop-in replacement for Navigation when using Location2D.
+    """
+
+    def __init__(self, state: State, motion: MotionController, config: RobotConfig):
+        super().__init__(state, motion, config)
+        # Replace the Map created by Navigation.__init__ with Map2D
+        self.map = Map2D(state=state, config=config)
+
+    async def get_obstacle_positions(self) -> dict:
+        """
+        Return a dict with non-None sentinel values for sensors that have a
+        valid reading.  The actual world position is not needed here because
+        Map2D.update_obstacles uses grid arithmetic, not the obstacle world
+        position.
+        """
+        result = {}
+        for side in ("left", "right", "center"):
+            sensor = getattr(self.state.sensors, f"ultrasonic_{side}")
+            result[side] = None if sensor.distance < 0.0 else np.zeros(3)
+        return result
+
+
 if __name__ == "__main__":
     # Run from the project root as:  python -m modules.navigation_system
     # (relative imports at the top of this file require the package context)
@@ -838,9 +1100,9 @@ if __name__ == "__main__":
         config = RobotConfig()
 
         sensors = SensorInput(state=state, config=config)
-        location = Location(state=state, config=config)
+        location = Location2D(state=state, config=config)
         motion = MotionController(state=state, config=config)
-        navigation = Navigation(state=state, motion=motion, config=config)
+        navigation = Navigation2D(state=state, motion=motion, config=config)
 
         await sensors.setup()
         await location.setup()
