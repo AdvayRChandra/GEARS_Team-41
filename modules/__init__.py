@@ -1,5 +1,6 @@
 # MACRO core systems modules
 from .motion import MotionController
+from .cargo import Cargo
 from .navigation_system import Transformation, Location, Navigation, Map
 from .state import (
     State,
@@ -42,4 +43,5 @@ __all__ = [
     'IMUSensorConfig',
     'MotorConfig',
     'MapConfig',
+    'Cargo'
 ]

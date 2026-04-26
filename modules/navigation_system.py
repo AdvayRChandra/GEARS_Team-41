@@ -1056,6 +1056,10 @@ class Navigation2D(Navigation):
         super().__init__(state, motion, config)
         # Replace the Map created by Navigation.__init__ with Map2D
         self.map = Map2D(state=state, config=config)
+        # Signalled after the first run_navigation_update tick so that
+        # explore() / go_to() don't evaluate obstacle_neighbors before any
+        # sensor data has been written.
+        self._first_update_done: asyncio.Event = asyncio.Event()
 
     async def get_obstacle_positions(self) -> dict:
         """
@@ -1069,6 +1073,40 @@ class Navigation2D(Navigation):
             sensor = getattr(self.state.sensors, f"ultrasonic_{side}")
             result[side] = None if sensor.distance < 0.0 else np.zeros(3)
         return result
+
+    async def run_navigation_update(self, **kwargs):
+        update_interval = kwargs.get("update_interval", 0.1)
+        loop = asyncio.get_running_loop()
+
+        while True:
+            await asyncio.sleep(update_interval)
+
+            yaw_deg = self.state.nav.orientation[0]
+            nearest_cardinal = round(yaw_deg / 90) * 90
+            heading_error = abs((yaw_deg - nearest_cardinal + 180) % 360 - 180)
+            if heading_error <= self.angle_tolerance:
+                self._obstacles = await self.get_obstacle_positions()
+                self.map.update_obstacles(self._obstacles)
+
+            self.map.update_path()
+            self.state.nav.obstacle_neighbors = self.map.get_obstacle_states()
+            self._log.append({
+                "time": loop.time(),
+                "position": self.state.nav.position.copy(),
+                "orientation": self.state.nav.orientation.copy(),
+            })
+
+            # Signal that at least one full update has completed
+            if not self._first_update_done.is_set():
+                self._first_update_done.set()
+
+    async def explore(self):
+        await self._first_update_done.wait()
+        await super().explore()
+
+    async def go_to(self, destination_cell):
+        await self._first_update_done.wait()
+        await super().go_to(destination_cell)
 
 
 if __name__ == "__main__":

@@ -196,7 +196,7 @@ class MapConfig:
     y_min: float = -10.0
     y_max: float = 10.0
     resolution: float = 0.10
-    magnetic_threshold: float = 1000.0
+    magnetic_threshold: float = 500.0
     ir_threshold: int = 300
     team: int = 0
     unit_length: int = 10

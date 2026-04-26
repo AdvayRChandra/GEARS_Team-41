@@ -15,7 +15,7 @@ PIN_IR_1         = 2
 # Thresholds
 DIST_THRESHOLD   = 5.0
 IR_THRESHOLD     = 100
-MAG_THRESHOLD    = 200
+MAG_THRESHOLD    = 500
 
 # Movement Settings (DPS)
 DRIVE_SPEED_DPS  = 30
@@ -157,9 +157,9 @@ class RoverMapper:
                 
                 mag = self.get_magnetic_magnitude()
 
-                wall_front = d_front < 10
-                heat_front = ir_heat > 60
-                mag_front  = mag > 300
+                wall_front = d_front < 15
+                heat_front = ir_heat > 100
+                mag_front  = mag > 400
 
                 if wall_front or heat_front or mag_front:
                     reason = ""
@@ -176,15 +176,15 @@ class RoverMapper:
                         print("% Turning Left (90)")
                         self.turn_in_place(70)
 
-                elif d_left < 7.0:
+                elif d_left < 5.0:
                     print(f"% Adjusting Right (10) - Left Wall: {d_left}")
                     self.turn_in_place(-15)
-                    self.move_forward(1)
+                    #self.move_forward(1)
 
                 elif d_right < 7.0:
                     print(f"% Adjusting Left (10) - Right Wall: {d_right}")
                     self.turn_in_place(15)
-                    self.move_forward(1)
+                    #self.move_forward(1)
                 else:
                     self.move_forward(0.5)
 
